@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.0
+
+- Add requested assistant execution with `canvas_run_node`, `canvas_get_run` and `canvas_cancel_run` through Canvas's existing project-owned Harness.
+- Sequence a flow by observing upstream success and fresh project revisions before starting downstream nodes.
+- Preserve request replay, durable recovery, headless missing-input handling and explicit confirmation for uncertain prior execution.
+- Cancel only the operation owned by a request; completed receipts cannot stop later work on the same node.
+- Extend isolated HTTP diagnostics to twelve tools with provider-aware execution annotations and synthetic jobs; no paid model runs are used for validation.
+
 ## 1.4.0
 
 - Add flow authoring and editing through `canvas_edit_project` in the active open Canvas project.

@@ -33,6 +33,16 @@ Yalnızca aktif proje düzenlenebilir; `project_not_active` alırsanız Canvas't
 
 Araç asistanları çalıştırmaz, medya dosyası içe aktarmaz ve node veya kablo silmez. Boş görsel/video node'u, üretilmiş çıktı değildir. Asistan portlarını mevcut tanımlardan okuyun; henüz yayımlanmamış numaralı çıktı portlarını tahmin etmeyin. Geçersiz bir düzenleme tümüyle reddedilir.
 
+## Flow çalıştırma araçları yok veya çalıştırma duruyor
+
+Çalıştırma için eklenti 1.5.0 ve `canvas_run_node`, `canvas_get_run`, `canvas_cancel_run` araçlarını sunan güncel Canvas gerekir. Sadece eklentiyi güncellemek çalışan uygulamaya yeni araç eklemez. Güncel Canvas sürümünü açıp MCP bağlantısını yenileyin. Araç yoksa ekranda tıklama, tarayıcı veya doğrudan model çağrısıyla çalıştırmayı taklit etmeyin.
+
+Çalıştırma tek asistan node'u için başlatılır. Zincirde önce üstteki asistanın durumunu izleyin; yalnızca `succeeded` sonrasında yeni proje revizyonunu okuyup alttakini başlatın. Eski çıktı kartlarının görünmesi veya HTTP çağrısının bitmesi başarı kanıtı değildir. `needs_input`, `failed`, `not_started`, `recovery_required`, `canceled` veya `stopped` durumunda zincir durmalıdır. Eksik hesap/model girdisi Canvas'tan tamamlanır; MCP kimlik doğrulama veya hesap arayüzünü otomatik açmaz.
+
+Yanıt kaybolursa aynı node, istek kimliği ve içerikle yeniden deneyin veya `canvas_get_run` kullanın. Yeni kimlikle körlemesine tekrar denemek çift üretime yol açabilir. `run_not_found`, açık oturumun geçmişinde kayıt olmadığını gösterir; daha önceki isteğin çalışmadığını kanıtlamaz. `run_confirmation_required` alırsanız önce önceki isteğin zaten çalışmış olabileceğini açıklayın; kullanıcı bu riske rağmen yeni üretimi açıkça onaylamadan `confirmNewRun: true` göndermeyin.
+
+`canvas_cancel_run` sadece verilen isteğin sahip olduğu işi durdurmayı ister. `canceling` tamamlanmış iptal değildir; terminal durumu takip edin. İptal, sağlayıcıya ulaşmış bir isteği geri çağıramaz ve başka Canvas işlerini durdurmaz. HTTP bağlantısının kopması kabul edilmiş işi iptal etmez. Çalışmaya başlamış bir iş sekme değişse de sürebilir; hazırlık aşamasında yerel başlatma koşulları değişirse `not_started` dönebilir.
+
 ## Asistan oluşturma veya dışarı aktarma araçları yok
 
 Bu işlemler için hem Canvas eklentisi 1.2.0 veya üzeri hem de asistan oluşturma araçlarını sunan güncel Canvas uygulaması gerekir. `canvas_get_assistant`, `canvas_create_assistant` ve `canvas_export_assistant` araçlarının görünmesini kontrol edin. Eklentiyi güncellemek çalışan Canvas uygulamasına yeni araç eklemez; yeni uygulama sürümünü açıp MCP bağlantısını yenileyin. Yeni araçlar gelene kadar proje okuma işlemleri çalışabilir. Profil klasörüne elle yazarak veya kurulu eklenti cache'ini değiştirerek bağlantıyı aşmaya çalışmayın.

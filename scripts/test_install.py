@@ -37,12 +37,13 @@ import uuid
 
 
 CANONICAL_ENDPOINT = "http://127.0.0.1:47321/mcp"
-READ_TOOLS = frozenset(("canvas_get_status", "canvas_list_projects", "canvas_get_project", "canvas_list_agents", "canvas_get_assistant"))
-WRITE_TOOLS = frozenset(("canvas_create_assistant", "canvas_export_assistant", "canvas_delete_assistant", "canvas_edit_project"))
-DESTRUCTIVE_TOOLS = frozenset(("canvas_delete_assistant", "canvas_edit_project"))
-IDEMPOTENT_TOOLS = READ_TOOLS | {"canvas_edit_project"}
+READ_TOOLS = frozenset(("canvas_get_status", "canvas_list_projects", "canvas_get_project", "canvas_list_agents", "canvas_get_assistant", "canvas_get_run"))
+WRITE_TOOLS = frozenset(("canvas_create_assistant", "canvas_export_assistant", "canvas_delete_assistant", "canvas_edit_project", "canvas_run_node", "canvas_cancel_run"))
+DESTRUCTIVE_TOOLS = frozenset(("canvas_delete_assistant", "canvas_edit_project", "canvas_run_node", "canvas_cancel_run"))
+OPEN_WORLD_TOOLS = frozenset(("canvas_run_node",))
+IDEMPOTENT_TOOLS = READ_TOOLS | {"canvas_edit_project", "canvas_run_node", "canvas_cancel_run"}
 TOOLS = READ_TOOLS | WRITE_TOOLS
-PRE_DELETE_TOOLS = TOOLS - {"canvas_delete_assistant", "canvas_edit_project"}
+PRE_DELETE_TOOLS = TOOLS - {"canvas_delete_assistant", "canvas_edit_project", "canvas_run_node", "canvas_get_run", "canvas_cancel_run"}
 PROJECT_A = "11111111-1111-4111-8111-111111111111"
 PROJECT_B = "22222222-2222-4222-8222-222222222222"
 COMMON_FLAGS = ("--disable", "remote_plugin", "--disable", "apps")
@@ -200,7 +201,7 @@ class AppServer:
     def __enter__(self) -> "AppServer":
         try:
             self.call("initialize", {
-                "clientInfo": {"name": "canvas_plugin_install_test", "title": "Canvas installation diagnostic", "version": "1.4.0"},
+                "clientInfo": {"name": "canvas_plugin_install_test", "title": "Canvas installation diagnostic", "version": "1.5.0"},
                 # Diagnostics only: mcpServer/tool/call is experimental in some CLI versions.
                 "capabilities": {"experimentalApi": True},
             })
@@ -242,6 +243,18 @@ def tool_definition(name: str) -> dict[str, Any]:
             "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 100},
         }
         schema["required"] = ["sessionId"]
+    elif name == "canvas_run_node":
+        schema["properties"] = {
+            "sessionId": {"type": "string", "format": "uuid"}, "nodeId": {"type": "string", "format": "uuid"},
+            "request": {"type": "object", "properties": {
+                "requestId": {"type": "string", "format": "uuid"},
+                "expectedRevision": {"type": "integer", "minimum": 0},
+                "confirmNewRun": {"type": "boolean", "default": False}},
+                "required": ["requestId", "expectedRevision"], "additionalProperties": False}}
+        schema["required"] = ["sessionId", "nodeId", "request"]
+    elif name in {"canvas_get_run", "canvas_cancel_run"}:
+        schema["properties"] = {key: {"type": "string", "format": "uuid"} for key in ("sessionId", "requestId")}
+        schema["required"] = ["sessionId", "requestId"]
     elif name in {"canvas_get_assistant", "canvas_export_assistant", "canvas_delete_assistant"}:
         schema["properties"] = {"assistantId": {"type": "string"}}
         schema["required"] = ["assistantId"]
@@ -281,7 +294,7 @@ def tool_definition(name: str) -> dict[str, Any]:
     return {
         "name": name, "description": "In-memory Canvas installation-test fixture: " + name,
         "inputSchema": schema,
-        "annotations": {"readOnlyHint": read_only, "destructiveHint": name in DESTRUCTIVE_TOOLS, "idempotentHint": name in IDEMPOTENT_TOOLS, "openWorldHint": False},
+        "annotations": {"readOnlyHint": read_only, "destructiveHint": name in DESTRUCTIVE_TOOLS, "idempotentHint": name in IDEMPOTENT_TOOLS, "openWorldHint": name in OPEN_WORLD_TOOLS},
     }
 
 
@@ -314,6 +327,8 @@ class McpFixture:
         self.personal_assistants: set[str] = set()
         self.projects = {}
         self.edit_receipts: dict[tuple[str, str], tuple[str, dict[str, Any]]] = {}
+        self.runs: dict[tuple[str, str], dict[str, Any]] = {}
+        self.confirmation_required: set[str] = set()
         for session in (PROJECT_A, PROJECT_B):
             values = [{"id": str(uuid.uuid5(uuid.UUID(session), f"node:{i}")), "kind": "Text", "x": i, "y": 0,
                        "text": f"{session} node {i}", "textTruncated": False, "agentId": None, "agentName": None,
@@ -473,6 +488,10 @@ class McpFixture:
                              "hasMoreNodes": offset + limit < len(values), "hasMoreEdges": offset + limit < len(edges)}
         elif name == "canvas_edit_project":
             value, error = self.edit_project(arguments)
+        elif name == "canvas_run_node":
+            value, error = self.run_node(arguments)
+        elif name in {"canvas_get_run", "canvas_cancel_run"}:
+            value, error = self.observe_run(arguments, cancel=name == "canvas_cancel_run")
         else:
             value, error = {"error": {"code": "unknown_method"}}, "unknown_method"
         return {"content": [{"type": "text", "text": json.dumps(value)}], "structuredContent": value, "isError": bool(error)}
@@ -615,6 +634,126 @@ class McpFixture:
             return receipt, None
 
 
+    @staticmethod
+    def valid_run_guid(value: Any) -> bool:
+        try:
+            return isinstance(value, str) and uuid.UUID(value).int != 0
+        except ValueError:
+            return False
+
+    @staticmethod
+    def run_error(code: str) -> tuple[dict[str, Any], str]:
+        return {"error": {"code": code}}, code
+
+    def run_snapshot(self, record: dict[str, Any], replayed: bool = False) -> dict[str, Any]:
+        if record["completed"]:
+            return {**copy.deepcopy(record["snapshot"]), "replayed": replayed}
+        state = self.projects[record["sessionId"]]
+        node = next(item for item in state["nodes"] if item["id"] == record["nodeId"])
+        return {"sessionId": record["sessionId"], "requestId": record["request"]["requestId"], "nodeId": node["id"],
+                "status": record["status"], "phase": record["phase"], "errorCode": None, "revision": state["revision"],
+                "node": copy.deepcopy(node), "outputs": [], "replayed": replayed, "hasMoreOutputs": False}
+
+    def run_node(self, arguments: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
+        """Admit only synthetic in-memory work; no Canvas engine or provider is called."""
+        session, node_id, request = arguments.get("sessionId"), arguments.get("nodeId"), arguments.get("request")
+        if not self.valid_run_guid(session) or not self.valid_run_guid(node_id) or not isinstance(request, dict):
+            return self.run_error("invalid_argument")
+        if not self.valid_run_guid(request.get("requestId")) or not isinstance(request.get("expectedRevision"), int) or isinstance(request.get("expectedRevision"), bool) or request["expectedRevision"] < 0 or not isinstance(request.get("confirmNewRun", False), bool):
+            return self.run_error("invalid_argument")
+        normalized = {"requestId": request["requestId"], "expectedRevision": request["expectedRevision"], "confirmNewRun": request.get("confirmNewRun", False)}
+        key = (session, request["requestId"])
+        with self.lock:
+            if session not in self.projects:
+                return self.run_error("project_not_found")
+            if key in self.runs:
+                record = self.runs[key]
+                if record["nodeId"] != node_id or record["request"] != normalized:
+                    return self.run_error("request_conflict")
+                return self.run_snapshot(record, replayed=True), None
+            if session != PROJECT_A:
+                return self.run_error("project_not_active")
+            state = self.projects[session]
+            if state["revision"] != request["expectedRevision"]:
+                return self.run_error("revision_conflict")
+            node = next((item for item in state["nodes"] if item["id"] == node_id), None)
+            if node is None:
+                return self.run_error("node_not_found")
+            active = [item for item in self.runs.values() if item["sessionId"] == session and not item["completed"]]
+            if node["state"] == "Running" or any(item["nodeId"] == node_id for item in active):
+                return self.run_error("node_running")
+            if node["kind"] != "ImageGenerator" or node["agentId"] not in self.assistants:
+                return self.run_error("agent_unavailable")
+            visited, pending = set(), [edge["sourceId"] for edge in state["edges"] if edge["targetId"] == node_id]
+            while pending:
+                upstream = pending.pop()
+                if upstream in visited:
+                    continue
+                visited.add(upstream)
+                if any(item["nodeId"] == upstream for item in active):
+                    return self.run_error("upstream_running")
+                pending.extend(edge["sourceId"] for edge in state["edges"] if edge["targetId"] == upstream)
+            if node_id in self.confirmation_required and not normalized["confirmNewRun"]:
+                return self.run_error("run_confirmation_required")
+            if len(active) >= 8:
+                return self.run_error("run_limit")
+            node["state"] = "Running"
+            state["revision"] += 1
+            record = {"sessionId": session, "nodeId": node_id, "request": normalized, "status": "running", "phase": "preparing",
+                      "polls": 0, "completed": False}
+            self.runs[key] = record
+            return self.run_snapshot(record), None
+
+    def finish_fixture_run(self, record: dict[str, Any], status: str) -> None:
+        state = self.projects[record["sessionId"]]
+        node = next(item for item in state["nodes"] if item["id"] == record["nodeId"])
+        outputs = []
+        if status == "succeeded":
+            output_id = str(uuid.uuid4())
+            item_port = "context::fixture-" + record["request"]["requestId"]
+            output = {"id": output_id, "kind": "Text", "x": node["x"] + 360, "y": node["y"],
+                      "text": "Synthetic fixture result; no model was called.", "textTruncated": False,
+                      "agentId": None, "agentName": None, "state": "Idle", "assetId": None, **fixture_node_ports("Text")}
+            state["nodes"].append(output)
+            state["edges"].append({"id": str(uuid.uuid4()), "sourceId": node["id"], "targetId": output_id,
+                                   "sourcePortId": item_port, "targetPortId": "value"})
+            node["outputPorts"].append({"id": item_port, "name": "Context 1", "kind": "Text", "required": True, "multiple": False, "maxItems": None})
+            node["state"] = "Ready"
+            outputs = [copy.deepcopy(output)]
+        else:
+            node["state"] = "Idle"
+        state["revision"] += 1
+        record["status"], record["phase"] = status, None
+        snapshot = self.run_snapshot(record)
+        snapshot["outputs"] = outputs
+        record["snapshot"], record["completed"] = snapshot, True
+        finished = [key for key, item in self.runs.items() if key[0] == record["sessionId"] and item["completed"]]
+        for key in finished[:-128]:
+            del self.runs[key]
+
+    def observe_run(self, arguments: dict[str, Any], cancel: bool = False) -> tuple[dict[str, Any], str | None]:
+        session, request_id = arguments.get("sessionId"), arguments.get("requestId")
+        if not self.valid_run_guid(session) or not self.valid_run_guid(request_id):
+            return self.run_error("invalid_argument")
+        with self.lock:
+            if session not in self.projects:
+                return self.run_error("project_not_found")
+            record = self.runs.get((session, request_id))
+            if record is None:
+                return self.run_error("run_not_found")
+            if not record["completed"]:
+                if cancel:
+                    record["status"] = "canceling"
+                elif record["status"] == "canceling":
+                    self.finish_fixture_run(record, "canceled")
+                else:
+                    record["polls"] += 1
+                    record["phase"] = "working"
+                    if record["polls"] >= 2:
+                        self.finish_fixture_run(record, "succeeded")
+            return self.run_snapshot(record), None
+
+
 def structured(result: dict[str, Any]) -> Any:
     if result.get("structuredContent") is not None:
         return result["structuredContent"]
@@ -656,6 +795,8 @@ def discover_canvas(server: AppServer, thread_id: str | None = None, require_cur
               f"Tool must advertise its actual destructive behavior: {name}")
         check(tool.get("annotations", {}).get("idempotentHint") is (name in IDEMPOTENT_TOOLS),
               f"Tool must advertise its actual retry behavior: {name}")
+        check(tool.get("annotations", {}).get("openWorldHint") is (name in OPEN_WORLD_TOOLS),
+              f"Tool must advertise whether external providers can be called: {name}")
     return result
 
 
@@ -693,6 +834,7 @@ def engine_checks(codex: str, environment: dict[str, str], cwd: Path, selector: 
         project_checks = 0
         authoring_checks = 0
         flow_checks = 0
+        execution_checks = 0
         if fixture:
             check(len(projects) == 2 and projects[0]["title"] == projects[1]["title"], "Fixture must exercise duplicate project titles")
             selected = next(project for project in projects if not project["isActive"])
@@ -744,6 +886,40 @@ def engine_checks(codex: str, environment: dict[str, str], cwd: Path, selector: 
                   and next(item for item in final["nodes"] if item["id"] == ids["agent"])["x"] == 800,
                   "Existing node text and positions must round-trip through the connection")
             flow_checks = 6
+            # Synthetic job lifecycle only: this fixture has no provider/client implementation.
+            current = structured(call("canvas_get_project", {"sessionId": PROJECT_A}))
+            run_request = {"requestId": str(uuid.uuid4()), "expectedRevision": current["project"]["revision"]}
+            run_args = {"sessionId": PROJECT_A, "nodeId": ids["agent"], "request": run_request}
+            admitted = call("canvas_run_node", run_args)
+            check(not admitted.get("isError") and structured(admitted)["status"] == "running", "Execution must return an immediate receipt")
+            repeated = call("canvas_run_node", run_args)
+            check(not repeated.get("isError") and structured(repeated)["replayed"], "An exact start retry must not create a second job")
+            changed_run = call("canvas_run_node", {**run_args, "request": {**run_request, "confirmNewRun": True}})
+            check(changed_run.get("isError") and structured(changed_run)["error"]["code"] == "request_conflict",
+                  "Changing a run confirmation flag under the same request must conflict")
+            query = {"sessionId": PROJECT_A, "requestId": run_request["requestId"]}
+            progressing = call("canvas_get_run", query)
+            check(not progressing.get("isError") and structured(progressing)["status"] == "running", "Status read must expose running work")
+            completed = call("canvas_get_run", query)
+            check(not completed.get("isError") and structured(completed)["status"] == "succeeded" and len(structured(completed)["outputs"]) == 1,
+                  "Successful execution must return actual synthetic result snapshots")
+            after_run = structured(call("canvas_get_project", {"sessionId": PROJECT_A}))
+            cancel_request = {"requestId": str(uuid.uuid4()), "expectedRevision": after_run["project"]["revision"]}
+            cancel_start = call("canvas_run_node", {**run_args, "request": cancel_request})
+            check(not cancel_start.get("isError"), "A separate requested run must receive a separate receipt")
+            cancel_query = {"sessionId": PROJECT_A, "requestId": cancel_request["requestId"]}
+            old_cancel = call("canvas_cancel_run", query)
+            check(not old_cancel.get("isError") and structured(old_cancel)["status"] == "succeeded",
+                  "Canceling a completed receipt must not cancel a later run of the same node")
+            canceling = call("canvas_cancel_run", cancel_query)
+            repeated_cancel = call("canvas_cancel_run", cancel_query)
+            check(not canceling.get("isError") and structured(canceling)["status"] == "canceling"
+                  and structured(repeated_cancel)["status"] == "canceling", "Cancellation requests must be owned and idempotent")
+            canceled = call("canvas_get_run", cancel_query)
+            check(not canceled.get("isError") and structured(canceled)["status"] == "canceled", "Observe cancellation until terminal")
+            missing_run = call("canvas_get_run", {"sessionId": PROJECT_A, "requestId": str(uuid.uuid4())})
+            check(missing_run.get("isError") and structured(missing_run)["error"]["code"] == "run_not_found", "Missing run receipt error was lost")
+            execution_checks = 10
             original = call("canvas_get_assistant", {"assistantId": "fixture-agent"})
             check(not original.get("isError") and structured(original)["instructions"], "Assistant definition inspection failed")
             definition = {"id": "user.install-check", "pluginId": "user.assistant.install-check", "name": "Install check",
@@ -784,7 +960,8 @@ def engine_checks(codex: str, environment: dict[str, str], cwd: Path, selector: 
                 "toolCount": len(inventory["tools"]), "bundledSkillNames": [skill["name"] for skill in bundled],
                 "personalDeletionAvailable": "canvas_delete_assistant" in inventory["tools"],
                 "flowEditingAvailable": "canvas_edit_project" in inventory["tools"],
-                "projectChecks": project_checks, "fixtureAuthoringChecks": authoring_checks, "fixtureFlowChecks": flow_checks, "modelTurns": 0}
+                "executionAvailable": {"canvas_run_node", "canvas_get_run", "canvas_cancel_run"}.issubset(inventory["tools"]),
+                "projectChecks": project_checks, "fixtureAuthoringChecks": authoring_checks, "fixtureFlowChecks": flow_checks, "fixtureExecutionChecks": execution_checks, "modelTurns": 0}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -851,7 +1028,7 @@ def main(argv: list[str] | None = None) -> int:
                 methods = {request["method"] for request in fixture.calls}
                 tools_called = {request["params"]["name"] for request in fixture.calls if request["method"] == "tools/call"}
                 check({"initialize", "tools/list", "tools/call"}.issubset(methods), "Fixture did not observe a real MCP handshake and tool call")
-                check(tools_called == TOOLS, "Client did not call all nine Canvas tools")
+                check(tools_called == TOOLS, "Client did not call all twelve Canvas tools")
                 report["fixture"] = {"endpoint": endpoint, "toolsCalled": sorted(tools_called), "requestCount": len(fixture.calls)}
             report["offline"] = offline_check(args.codex, environment, cwd)
             with McpFixture() as recovered:

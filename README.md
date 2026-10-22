@@ -1,6 +1,6 @@
 # Canvas eklentisi
 
-Canvas'ta açık projeleri Codex'e okutun ve konuşarak flow oluşturun. Eklenti metin ve asistan node'ları ekleyebilir, konumlarını ve metinlerini düzenleyebilir, node'ları bağlayabilir. Kendi asistanınızı oluşturup `.flowast` olarak dışarı aktarabilir veya kişisel asistanlarınızı silebilirsiniz. Flow oluşturmak asistanları çalıştırmaz; çalıştırmayı Canvas'tan başlatırsınız.
+Canvas'ta açık projeleri Codex'e okutun ve konuşarak flow oluşturun. Eklenti metin ve asistan node'ları ekleyebilir, konumlarını ve metinlerini düzenleyebilir, node'ları bağlayabilir. Kendi asistanınızı oluşturup `.flowast` olarak dışarı aktarabilir veya kişisel asistanlarınızı silebilirsiniz. Flow oluşturmak asistanları çalıştırmaz. Çalıştırmasını istediğinizde Codex, Canvas'ın kendi asistan motorundan akışı başlatabilir ve sonucunu takip edebilir.
 
 Windows'ta Canvas ve Codex aynı bilgisayarda çalışmalıdır. İkisi de `http://127.0.0.1:47321/mcp` adresini kullanır. Adres veya config dosyası düzenlemeniz gerekmez. Eklentiyi güncellemek çalışan Canvas uygulamasına yeni araç eklemez; güncel uygulama sürümünü açın.
 
@@ -22,7 +22,13 @@ Yalnızca bu bilgisayardaki açık Canvas projelerine erişilir. MCP sonuçları
 
 > Açık Canvas projesinde bir fikir metnini Prompt Assistant'a, onu da Image Assistant'a bağlayan bir flow oluştur.
 
-Codex aktif projenin mevcut node'larını ve kullanılabilir asistanların portlarını okur, ardından yeni node'ları ve bağlantıları aynı projeye ekler. Metinleri ve konumları da değiştirebilir. Flow'lar uygulamanın normal proje düzenleme ve kaydetme yolunu kullanır. Proje oluşturma, node silme, asistan çalıştırma ve medya üretimi bu araçlara dahil değildir.
+Codex aktif projenin mevcut node'larını ve kullanılabilir asistanların portlarını okur, ardından yeni node'ları ve bağlantıları aynı projeye ekler. Metinleri ve konumları da değiştirebilir. Flow'lar uygulamanın normal proje düzenleme ve kaydetme yolunu kullanır. Proje oluşturma, node silme ve dosya içe aktarma bu araçlara dahil değildir. Çalıştırma ayrı bir istektir; asistanlar Canvas'ta ayarlanmış hesapları, modelleri ve araçları kullanır.
+
+## Flow'u çalıştırın
+
+> Açık projedeki bu flow'u bağımlılık sırasıyla çalıştır ve sonucu bildir.
+
+Çalıştırma Canvas'ın mevcut asistan motorunu kullanır. Codex node'ları ekranda tıklayarak çalıştırmaz; MCP üzerinden işi başlatır ve durumunu okur. Talimat ve görsel üretimi, Canvas'taki model ve hesap ayarlarıyla gerçekleşir. Sadece flow çizmesini istemek çalıştırma yetkisi vermez.
 
 ## Kendi asistanınızı oluşturun
 

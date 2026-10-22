@@ -59,7 +59,7 @@ class PackageChecks(unittest.TestCase):
         self.assertNotIn("env", server)
         self.assertNotIn("oauth", server)
 
-    def test_skills_cover_workspace_reads_flow_edits_and_assistant_authoring(self):
+    def test_skills_cover_workspace_reads_edits_execution_and_assistant_authoring(self):
         files = list((self.plugin_root / "skills").glob("*/SKILL.md"))
         self.assertTrue(files, "Canvas skill must be included")
         combined = "\n".join(path.read_text(encoding="utf-8") for path in files)
@@ -108,6 +108,7 @@ class FixtureContractChecks(unittest.TestCase):
                 self.assertEqual(tool["annotations"]["readOnlyHint"], tool["name"] in install.READ_TOOLS)
                 self.assertEqual(tool["annotations"]["destructiveHint"], tool["name"] in install.DESTRUCTIVE_TOOLS)
                 self.assertEqual(tool["annotations"]["idempotentHint"], tool["name"] in install.IDEMPOTENT_TOOLS)
+                self.assertEqual(tool["annotations"]["openWorldHint"], tool["name"] in install.OPEN_WORLD_TOOLS)
 
     def test_assistant_create_inspect_and_export_cross_the_http_connection(self):
         with install.McpFixture(0) as fixture:
@@ -268,6 +269,118 @@ class FixtureContractChecks(unittest.TestCase):
         self.assertEqual(edit["properties"]["nodes"]["items"]["properties"]["kind"]["enum"], ["text", "assistant", "image", "video"])
         for field, maximum in (("nodes", 100), ("connections", 200), ("textUpdates", 100), ("moves", 100)):
             self.assertEqual(edit["properties"][field]["maxItems"], maximum)
+
+    def execution_call(self, fixture, name, arguments):
+        return self.rpc(fixture.endpoint, "tools/call", {"name": name, "arguments": arguments})[1]["result"]
+
+    def add_execution_nodes(self, fixture, connected=False):
+        edit = {"requestId": str(uuid.uuid4()), "expectedRevision": fixture.projects[install.PROJECT_A]["revision"],
+                "nodes": [{"key": key, "kind": "assistant", "x": index * 360, "y": 300, "assistantId": "fixture-agent"}
+                          for index, key in enumerate(("first", "second"))]}
+        if connected:
+            edit["connections"] = [{"source": "first", "target": "second", "sourcePortId": "context", "targetPortId": "context"}]
+        result = self.execution_call(fixture, "canvas_edit_project", {"sessionId": install.PROJECT_A, "edit": edit})
+        self.assertFalse(result["isError"])
+        return {item["key"]: item["node"]["id"] for item in install.structured(result)["nodes"]}
+
+    def run_arguments(self, fixture, node):
+        return {"sessionId": install.PROJECT_A, "nodeId": node,
+                "request": {"requestId": str(uuid.uuid4()), "expectedRevision": fixture.projects[install.PROJECT_A]["revision"]}}
+
+    def test_execution_admission_replay_progress_and_historical_receipt_cross_http(self):
+        with install.McpFixture(0) as fixture:
+            nodes = self.add_execution_nodes(fixture)
+            arguments = self.run_arguments(fixture, nodes["first"])
+            started = self.execution_call(fixture, "canvas_run_node", arguments)
+            self.assertFalse(started["isError"])
+            snapshot = install.structured(started)
+            self.assertEqual(snapshot["status"], "running")
+            self.assertEqual(snapshot["outputs"], [])
+            replay = self.execution_call(fixture, "canvas_run_node", arguments)
+            self.assertTrue(install.structured(replay)["replayed"])
+            self.assertEqual(len(fixture.runs), 1)
+            conflict = self.execution_call(fixture, "canvas_run_node", {**arguments, "request": {**arguments["request"], "confirmNewRun": True}})
+            self.assertEqual(install.structured(conflict)["error"]["code"], "request_conflict")
+            duplicate = self.execution_call(fixture, "canvas_run_node", self.run_arguments(fixture, nodes["first"]))
+            self.assertEqual(install.structured(duplicate)["error"]["code"], "node_running")
+            query = {"sessionId": install.PROJECT_A, "requestId": arguments["request"]["requestId"]}
+            self.assertEqual(install.structured(self.execution_call(fixture, "canvas_get_run", query))["status"], "running")
+            completed = install.structured(self.execution_call(fixture, "canvas_get_run", query))
+            self.assertEqual(completed["status"], "succeeded")
+            self.assertEqual(len(completed["outputs"]), 1)
+            self.assertEqual(completed["outputs"][0]["kind"], "Text")
+            self.assertFalse(completed["hasMoreOutputs"])
+            final_revision = completed["revision"]
+            moved = self.execution_call(fixture, "canvas_edit_project", {"sessionId": install.PROJECT_A, "edit": {
+                "requestId": str(uuid.uuid4()), "expectedRevision": final_revision,
+                "moves": [{"nodeId": nodes["first"], "x": 999, "y": 300}]}})
+            self.assertFalse(moved["isError"])
+            historical = install.structured(self.execution_call(fixture, "canvas_get_run", query))
+            self.assertEqual(historical, completed)
+            self.assertNotEqual(historical["revision"], fixture.projects[install.PROJECT_A]["revision"])
+
+    def test_execution_dependency_guard_requires_upstream_completion_and_fresh_revision(self):
+        with install.McpFixture(0) as fixture:
+            nodes = self.add_execution_nodes(fixture, connected=True)
+            upstream = self.run_arguments(fixture, nodes["first"])
+            self.assertFalse(self.execution_call(fixture, "canvas_run_node", upstream)["isError"])
+            downstream = self.run_arguments(fixture, nodes["second"])
+            guarded = self.execution_call(fixture, "canvas_run_node", downstream)
+            self.assertEqual(install.structured(guarded)["error"]["code"], "upstream_running")
+            query = {"sessionId": install.PROJECT_A, "requestId": upstream["request"]["requestId"]}
+            self.execution_call(fixture, "canvas_get_run", query)
+            success = self.execution_call(fixture, "canvas_get_run", query)
+            self.assertEqual(install.structured(success)["status"], "succeeded")
+            stale = self.execution_call(fixture, "canvas_run_node", downstream)
+            self.assertEqual(install.structured(stale)["error"]["code"], "revision_conflict")
+            fresh = self.run_arguments(fixture, nodes["second"])
+            started = self.execution_call(fixture, "canvas_run_node", fresh)
+            self.assertFalse(started["isError"])
+            self.assertEqual(install.structured(started)["status"], "running")
+            self.assertEqual(len(fixture.runs), 2)
+
+    def test_execution_cancellation_is_idempotent_and_cannot_touch_another_receipt(self):
+        with install.McpFixture(0) as fixture:
+            nodes = self.add_execution_nodes(fixture)
+            first = self.run_arguments(fixture, nodes["first"])
+            self.assertFalse(self.execution_call(fixture, "canvas_run_node", first)["isError"])
+            other = self.run_arguments(fixture, nodes["second"])
+            self.assertFalse(self.execution_call(fixture, "canvas_run_node", other)["isError"])
+            first_query = {"sessionId": install.PROJECT_A, "requestId": first["request"]["requestId"]}
+            other_query = {"sessionId": install.PROJECT_A, "requestId": other["request"]["requestId"]}
+            for _ in range(2):
+                self.assertEqual(install.structured(self.execution_call(fixture, "canvas_cancel_run", first_query))["status"], "canceling")
+            canceled = install.structured(self.execution_call(fixture, "canvas_get_run", first_query))
+            self.assertEqual(canceled["status"], "canceled")
+            self.assertEqual(install.structured(self.execution_call(fixture, "canvas_get_run", other_query))["status"], "running")
+            newer = self.run_arguments(fixture, nodes["first"])
+            self.assertFalse(self.execution_call(fixture, "canvas_run_node", newer)["isError"])
+            self.assertEqual(install.structured(self.execution_call(fixture, "canvas_cancel_run", first_query))["status"], "canceled")
+            newer_query = {"sessionId": install.PROJECT_A, "requestId": newer["request"]["requestId"]}
+            self.assertEqual(install.structured(self.execution_call(fixture, "canvas_get_run", newer_query))["status"], "running")
+            self.assertEqual(install.structured(self.execution_call(fixture, "canvas_get_run", first_query)), canceled)
+
+    def test_execution_unknown_receipts_confirmation_gate_and_annotations(self):
+        with install.McpFixture(0) as fixture:
+            nodes = self.add_execution_nodes(fixture)
+            missing = {"sessionId": install.PROJECT_A, "requestId": str(uuid.uuid4())}
+            for name in ("canvas_get_run", "canvas_cancel_run"):
+                result = self.execution_call(fixture, name, missing)
+                self.assertEqual(install.structured(result)["error"]["code"], "run_not_found")
+            fixture.confirmation_required.add(nodes["first"])
+            arguments = self.run_arguments(fixture, nodes["first"])
+            denied = self.execution_call(fixture, "canvas_run_node", arguments)
+            self.assertEqual(install.structured(denied)["error"]["code"], "run_confirmation_required")
+            self.assertEqual(len(fixture.runs), 0)
+            approved = {**arguments, "request": {**arguments["request"], "confirmNewRun": True}}
+            self.assertFalse(self.execution_call(fixture, "canvas_run_node", approved)["isError"])
+        start = install.tool_definition("canvas_run_node")
+        self.assertEqual(start["annotations"], {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": True})
+        self.assertEqual(start["inputSchema"]["required"], ["sessionId", "nodeId", "request"])
+        self.assertEqual(start["inputSchema"]["properties"]["request"]["required"], ["requestId", "expectedRevision"])
+        self.assertEqual(start["inputSchema"]["properties"]["request"]["properties"]["confirmNewRun"]["default"], False)
+        self.assertEqual(install.tool_definition("canvas_get_run")["annotations"], {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+        self.assertEqual(install.tool_definition("canvas_cancel_run")["annotations"], {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
 
     def test_browser_origin_is_rejected(self):
         with install.McpFixture(0) as fixture:
