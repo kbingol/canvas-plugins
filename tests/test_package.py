@@ -104,7 +104,7 @@ class FixtureContractChecks(unittest.TestCase):
             self.assertEqual({tool["name"] for tool in tools}, install.TOOLS)
             for tool in tools:
                 self.assertEqual(tool["annotations"]["readOnlyHint"], tool["name"] in install.READ_TOOLS)
-                self.assertFalse(tool["annotations"]["destructiveHint"])
+                self.assertEqual(tool["annotations"]["destructiveHint"], tool["name"] == "canvas_delete_assistant")
 
     def test_assistant_create_inspect_and_export_cross_the_http_connection(self):
         with install.McpFixture(0) as fixture:
@@ -119,6 +119,12 @@ class FixtureContractChecks(unittest.TestCase):
             self.assertEqual(install.structured(created)["id"], definition["id"])
             listed = install.structured(call("canvas_list_agents", {}))["agents"]
             self.assertIn(definition["id"], {item["id"] for item in listed})
+            personal = next(item for item in listed if item["id"] == definition["id"])
+            bundled = next(item for item in listed if item["id"] == "fixture-agent")
+            self.assertEqual(personal["origin"], "personal")
+            self.assertTrue(personal["canDelete"])
+            self.assertEqual(bundled["origin"], "bundled")
+            self.assertFalse(bundled["canDelete"])
             inspected = install.structured(call("canvas_get_assistant", {"assistantId": definition["id"]}))
             self.assertEqual(inspected["instructions"], definition["instructions"])
             self.assertEqual(inspected["version"], "1.0.0")
@@ -130,8 +136,31 @@ class FixtureContractChecks(unittest.TestCase):
             self.assertNotEqual(first["filePath"], second["filePath"])
             collision = call("canvas_export_assistant", {"assistantId": definition["id"], "destinationPath": first["filePath"]})
             self.assertTrue(collision["isError"])
-            for tool in ("canvas_get_assistant", "canvas_export_assistant"):
+            for tool in ("canvas_get_assistant", "canvas_export_assistant", "canvas_delete_assistant"):
                 self.assertTrue(call(tool, {"assistantId": "missing"})["isError"])
+            protected = call("canvas_delete_assistant", {"assistantId": "fixture-agent"})
+            self.assertEqual(install.structured(protected)["error"]["code"], "assistant_protected")
+            deleted = call("canvas_delete_assistant", {"assistantId": definition["id"]})
+            self.assertFalse(deleted["isError"])
+            self.assertEqual(install.structured(deleted), {"id": definition["id"], "name": definition["name"]})
+            self.assertEqual(fixture.exports, {first["filePath"], second["filePath"]})
+            listed = install.structured(call("canvas_list_agents", {}))["agents"]
+            self.assertNotIn(definition["id"], {item["id"] for item in listed})
+            repeated = call("canvas_delete_assistant", {"assistantId": definition["id"]})
+            self.assertEqual(install.structured(repeated)["error"]["code"], "assistant_not_found")
+            self.assertFalse(call("canvas_create_assistant", {"definition": definition})["isError"])
+
+    def test_live_discovery_accepts_older_app_and_reports_only_advertised_annotations(self):
+        class SevenToolServer:
+            def call(self, method, params):
+                return {"data": [{"name": "canvas", "tools": {
+                    name: install.tool_definition(name) for name in install.PRE_DELETE_TOOLS
+                }}]}
+
+        result = install.discover_canvas(SevenToolServer(), require_deletion=False)
+        self.assertNotIn("canvas_delete_assistant", result["tools"])
+        with self.assertRaises(install.CheckFailure):
+            install.discover_canvas(SevenToolServer())
 
     def test_projects_route_by_session_and_page_nodes_and_edges_independently(self):
         with install.McpFixture(0) as fixture:

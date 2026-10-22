@@ -1,13 +1,13 @@
 ---
 name: canvas
-description: Read and explain open projects, node text previews, graph connections, and available agent definitions in the local Canvas desktop app. Also route requests to create or export Canvas assistant packages. Use for the user's Canvas app, not HTML canvas or other products named Canvas.
+description: Read and explain open projects, node text previews, graph connections, and available agent definitions in the local Canvas desktop app. Also route requests to create, export or delete personal Canvas assistant packages. Use for the user's Canvas app, not HTML canvas or other products named Canvas.
 ---
 
 # Work with Canvas
 
-Use the connected Canvas MCP tools on the user's computer. Call `canvas_get_status` to confirm the real instance and its capabilities. Host namespace prefixes can vary. Project access is read-only; assistant package creation and export are the supported writes. The connection cannot open saved projects, edit nodes, run assistants, generate media, or read account credentials.
+Use the connected Canvas MCP tools on the user's computer. Call `canvas_get_status` to confirm the real instance and its capabilities. Host namespace prefixes can vary. Project access is read-only; assistant package creation, export and personal-package deletion are the supported writes. The connection cannot open saved projects, edit nodes, run assistants, generate media, or read account credentials.
 
-For creating or exporting an assistant, use the packaged `assistant-authoring` skill. `canvas_list_agents` lists registered agent definitions; `canvas_get_assistant` returns an installed assistant's full authoring definition. The latter can fail for a native function that is not an assistant package. Creating a package does not execute it.
+For creating, exporting or deleting a personal assistant, use the packaged `assistant-authoring` skill. `canvas_list_agents` lists registered agent definitions, their `origin` (`bundled` or `personal`) and `canDelete`; `canvas_get_assistant` returns an installed assistant's full authoring definition. The latter can fail for a native function that is not an assistant package. Creating a package does not execute it.
 
 ## Find the right project
 

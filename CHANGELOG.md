@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.0
+
+- Add user-requested personal assistant deletion through `canvas_delete_assistant`; app-provided bundled assistants are protected.
+- Describe installation provenance (`origin`) and deletion permission (`canDelete`), including MCP-created personal packages.
+- Preserve project nodes, saved outputs, started jobs and exported archives when removing an installed personal package.
+- Extend isolated diagnostics to eight tools with the destructive deletion annotation; live diagnostics remain read-only and report support without requiring a newer app to have already restarted.
+
 ## 1.2.0
 
 - Add assistant authoring guidance for `canvas_get_assistant`, `canvas_create_assistant`, and `canvas_export_assistant` from the updated Canvas MCP server.

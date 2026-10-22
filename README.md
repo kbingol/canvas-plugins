@@ -1,44 +1,44 @@
 # Canvas eklentisi
 
-Canvas'ta açık projeleri yerel MCP bağlantısıyla Codex'e okutun; kendi asistanınızı oluşturup `.flowast` paketi olarak dışarı aktarın. Eklenti açık projeleri, kartları, bağlantıları ve agent tanımlarını okuyabilir. Asistan oluşturma ve dışarı aktarma paket dosyaları yazar; projeleri değiştirmez veya asistan çalıştırmaz.
+Canvas'ta aÃ§Ä±k projeleri yerel MCP baÄŸlantÄ±sÄ±yla Codex'e okutun; kendi asistanÄ±nÄ±zÄ± oluÅŸturup `.flowast` paketi olarak dÄ±ÅŸarÄ± aktarÄ±n. Eklenti aÃ§Ä±k projeleri, kartlarÄ±, baÄŸlantÄ±larÄ± ve agent tanÄ±mlarÄ±nÄ± okuyabilir. Asistan oluÅŸturma ve dÄ±ÅŸarÄ± aktarma paket dosyalarÄ± yazar; projeleri deÄŸiÅŸtirmez veya asistan Ã§alÄ±ÅŸtÄ±rmaz.
 
-Windows'ta Canvas ve Codex aynı bilgisayarda çalışmalıdır. Canvas ve eklenti aynı sabit yerel HTTP adresini kullanır: `http://127.0.0.1:47321/mcp`. Kullanıcının adres veya config dosyası düzenlemesi gerekmez.
+Windows'ta Canvas ve Codex aynÄ± bilgisayarda Ã§alÄ±ÅŸmalÄ±dÄ±r. Canvas ve eklenti aynÄ± sabit yerel HTTP adresini kullanÄ±r: `http://127.0.0.1:47321/mcp`. KullanÄ±cÄ±nÄ±n adres veya config dosyasÄ± dÃ¼zenlemesi gerekmez.
 
-**Gereksinim:** Bu sabit adresi kullanan güncel Canvas sürümü. Asistan oluşturma için uygulamanın `canvas_get_assistant`, `canvas_create_assistant` ve `canvas_export_assistant` araçlarını sunması gerekir. Eklenti yüklemek çalışan Canvas sürümünü güncellemez; uygulama güncellemesinden sonra yeni sürümü açın.
+**Gereksinim:** Bu sabit adresi kullanan gÃ¼ncel Canvas sÃ¼rÃ¼mÃ¼. Asistan oluÅŸturma iÃ§in uygulamanÄ±n `canvas_get_assistant`, `canvas_create_assistant` ve `canvas_export_assistant` araÃ§larÄ±nÄ± sunmasÄ± gerekir. Eklenti yÃ¼klemek Ã§alÄ±ÅŸan Canvas sÃ¼rÃ¼mÃ¼nÃ¼ gÃ¼ncellemez; uygulama gÃ¼ncellemesinden sonra yeni sÃ¼rÃ¼mÃ¼ aÃ§Ä±n.
 
 ## Kurulum
 
-1. Canvas'ı açın. **Ayarlar → MCP bağlantısı** bölümünde bağlantıyı açın.
-2. Codex masaüstü uygulamasında **Eklentiler → Ekle → Pazar yeri ekle** yolunu izleyin.
+1. Canvas'Ä± aÃ§Ä±n. **Ayarlar â†’ MCP baÄŸlantÄ±sÄ±** bÃ¶lÃ¼mÃ¼nde baÄŸlantÄ±yÄ± aÃ§Ä±n.
+2. Codex masaÃ¼stÃ¼ uygulamasÄ±nda **Eklentiler â†’ Ekle â†’ Pazar yeri ekle** yolunu izleyin.
 3. Depo adresi olarak `https://github.com/kbingol/canvas-plugins` girin.
-4. Eklenen **Canvas Plugins** kaynağında **Canvas → Yükle** seçin.
-5. Aynı bilgisayarda çalışan **yeni bir Codex sohbeti** açın. Canvas açık kalsın.
+4. Eklenen **Canvas Plugins** kaynaÄŸÄ±nda **Canvas â†’ YÃ¼kle** seÃ§in.
+5. AynÄ± bilgisayarda Ã§alÄ±ÅŸan **yeni bir Codex sohbeti** aÃ§Ä±n. Canvas aÃ§Ä±k kalsÄ±n.
 
-Denemek için şunu yazın:
+Denemek iÃ§in ÅŸunu yazÄ±n:
 
-> Canvas bağlantısını kontrol et ve açık projelerimi listele.
+> Canvas baÄŸlantÄ±sÄ±nÄ± kontrol et ve aÃ§Ä±k projelerimi listele.
 
-Ardından bir projeyi adıyla belirterek kartlarını özetlemesini isteyin. Yalnızca bu bilgisayardaki açık Canvas projelerine erişilir. MCP sonuçlarının konuşmada kullanılması istemcinin veri işleme ayarlarına tabidir.
+ArdÄ±ndan bir projeyi adÄ±yla belirterek kartlarÄ±nÄ± Ã¶zetlemesini isteyin. YalnÄ±zca bu bilgisayardaki aÃ§Ä±k Canvas projelerine eriÅŸilir. MCP sonuÃ§larÄ±nÄ±n konuÅŸmada kullanÄ±lmasÄ± istemcinin veri iÅŸleme ayarlarÄ±na tabidir.
 
-## Kendi asistanınızı oluşturun
+## Kendi asistanÄ±nÄ±zÄ± oluÅŸturun
 
-Örneğin şunu isteyin:
+Ã–rneÄŸin ÅŸunu isteyin:
 
-> Canvas'ta metinleri Türkçeye çeviren bir asistan oluştur ve .flowast olarak dışarı aktar.
+> Canvas'ta metinleri TÃ¼rkÃ§eye Ã§eviren bir asistan oluÅŸtur ve .flowast olarak dÄ±ÅŸarÄ± aktar.
 
-Codex, talimatları ve gerekiyorsa skill'leri hazırlar; Canvas bunları doğrulayıp `%LOCALAPPDATA%/Algomim/Canvas/assistants/<id>` klasörüne kaydeder. Yeni asistan uygulamada hemen görünür. Dışarı aktarılan `.flowast` dosyası varsayılan olarak Canvas'ın yerel `Exports` klasörüne yazılır; sonucu dönen dosya yolundan paylaşabilirsiniz. Asistanı kullanmak için Canvas'ta çalıştırın; MCP üzerinden paket oluşturmak modeli veya görsel üretimini başlatmaz.
+Codex, talimatlarÄ± ve gerekiyorsa skill'leri hazÄ±rlar; Canvas bunlarÄ± doÄŸrulayÄ±p `%LOCALAPPDATA%/Algomim/Canvas/assistants/<id>` klasÃ¶rÃ¼ne kaydeder. Yeni asistan uygulamada hemen gÃ¶rÃ¼nÃ¼r. DÄ±ÅŸarÄ± aktarÄ±lan `.flowast` dosyasÄ± varsayÄ±lan olarak Canvas'Ä±n yerel `Exports` klasÃ¶rÃ¼ne yazÄ±lÄ±r; sonucu dÃ¶nen dosya yolundan paylaÅŸabilirsiniz. AsistanÄ± kullanmak iÃ§in Canvas'ta Ã§alÄ±ÅŸtÄ±rÄ±n; MCP Ã¼zerinden paket oluÅŸturmak modeli veya gÃ¶rsel Ã¼retimini baÅŸlatmaz.
 
-Mevcut bir asistanın tam tanımı okunabilir ve yüklenmiş paketler dışarı aktarılabilir. Oluşturma mevcut paketin üzerine yazmaz; aynı kimlikle güncelleme veya silme aracı yoktur. `.flowast` dosyasını başka bir Canvas'ta **Ayarlar → Asistanlar → Asistan ekle** ile yükleyebilirsiniz.
+Mevcut bir asistanÄ±n tam tanÄ±mÄ± okunabilir ve yÃ¼klenmiÅŸ paketler dÄ±ÅŸarÄ± aktarÄ±labilir. OluÅŸturma mevcut paketin Ã¼zerine yazmaz; aynÄ± kimlikle gÃ¼ncelleme veya silme aracÄ± yoktur. `.flowast` dosyasÄ±nÄ± baÅŸka bir Canvas'ta **Ayarlar â†’ Asistanlar â†’ Asistan ekle** ile yÃ¼kleyebilirsiniz.
 
-Terminalden kurulum isteyenler için:
+Terminalden kurulum isteyenler iÃ§in:
 
 ```powershell
 codex plugin marketplace add kbingol/canvas-plugins
 codex plugin add canvas@canvas-plugins
 ```
 
-Kurulumdan sonra yeni oturum başlatın. Bu depo, ekleyebileceğiniz bağımsız bir eklenti kataloğudur; OpenAI'nin resmî herkese açık dizininde listelendiği anlamına gelmez. [OpenAI'nin pazar yeri ve kurulum rehberi](https://developers.openai.com/plugins/build/plugins#add-a-marketplace-from-the-cli)
+Kurulumdan sonra yeni oturum baÅŸlatÄ±n. Bu depo, ekleyebileceÄŸiniz baÄŸÄ±msÄ±z bir eklenti kataloÄŸudur; OpenAI'nin resmÃ® herkese aÃ§Ä±k dizininde listelendiÄŸi anlamÄ±na gelmez. [OpenAI'nin pazar yeri ve kurulum rehberi](https://developers.openai.com/plugins/build/plugins#add-a-marketplace-from-the-cli)
 
-## Yardım
+## YardÄ±m
 
-Bağlantı kurulamıyorsa [sorun giderme](docs/troubleshooting.md) sayfasına bakın. Paket yapısı ve doğrulama yaklaşımı [mimari notlarında](docs/architecture.md) bulunur. Lisans: [MIT](LICENSE).
+BaÄŸlantÄ± kurulamÄ±yorsa [sorun giderme](docs/troubleshooting.md) sayfasÄ±na bakÄ±n. Paket yapÄ±sÄ± ve doÄŸrulama yaklaÅŸÄ±mÄ± [mimari notlarÄ±nda](docs/architecture.md) bulunur. Lisans: [MIT](LICENSE).

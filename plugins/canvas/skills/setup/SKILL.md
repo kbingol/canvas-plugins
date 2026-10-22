@@ -5,7 +5,7 @@ description: Check or diagnose this plugin's connection to the local Canvas desk
 
 # Connect Canvas
 
-Use the user's language. Canvas must run on the same Windows computer with MCP enabled. This plugin reads open projects and agent definitions, and can create or export assistant packages with the updated Canvas app. Project access remains read-only; it cannot edit projects or run assistants. No account sign-in, API key, tunnel, additional local server, or manual client configuration is needed.
+Use the user's language. Canvas must run on the same Windows computer with MCP enabled. This plugin reads open projects and agent definitions, and can create, export or delete personal assistant packages with the updated Canvas app. Project access remains read-only; it cannot edit projects or run assistants. No account sign-in, API key, tunnel, additional local server, or manual client configuration is needed.
 
 Canvas and the bundled server both use `http://127.0.0.1:47321/mcp`. The user does not need to choose or enter an address.
 
@@ -14,7 +14,7 @@ Canvas and the bundled server both use `http://127.0.0.1:47321/mcp`. The user do
 3. Once Canvas is ready, restart the client's MCP connection or begin a new local conversation, then retry once. If Canvas reports a port conflict, report that concrete error; do not select another port or connect to an unrelated listener.
 4. After status succeeds, call `canvas_list_projects`. An empty list is a working connection with no open projects. Do not read project contents merely to check installation.
 
-Assistant authoring additionally needs `canvas_get_assistant`, `canvas_create_assistant`, and `canvas_export_assistant`. If they are missing, explain that the Canvas app must be updated and its MCP connection refreshed. Do not test setup by creating or exporting a package. Updating this plugin alone cannot change the running application's capabilities.
+Assistant authoring additionally needs `canvas_get_assistant`, `canvas_create_assistant`, and `canvas_export_assistant`; personal-package deletion additionally needs `canvas_delete_assistant`. If they are missing, explain that the Canvas app must be updated and its MCP connection refreshed. Do not test setup by creating, exporting or deleting a package. Updating this plugin alone cannot change the running application's capabilities.
 
 Report success only after a tool returns from the real Canvas instance. If execution is remote, use a local desktop conversation; a cloud runtime's `127.0.0.1` cannot reach the user's computer.
 

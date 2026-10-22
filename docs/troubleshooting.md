@@ -27,7 +27,11 @@ Bu komut katalog kaynağını yeniler. Eklentinin kurulu sürümünü ayrıca ko
 
 ## Asistan oluşturma veya dışarı aktarma araçları yok
 
-Bu işlemler için hem Canvas eklentisi 1.2.0 hem de asistan oluşturma araçlarını sunan güncel Canvas uygulaması gerekir. `canvas_get_assistant`, `canvas_create_assistant` ve `canvas_export_assistant` araçlarının görünmesini kontrol edin. Eklentiyi güncellemek çalışan Canvas uygulamasına yeni araç eklemez; yeni uygulama sürümünü açıp MCP bağlantısını yenileyin. Yeni araçlar gelene kadar proje okuma işlemleri çalışabilir. Profil klasörüne elle yazarak veya kurulu eklenti cache'ini değiştirerek bağlantıyı aşmaya çalışmayın.
+Bu işlemler için hem Canvas eklentisi 1.2.0 veya üzeri hem de asistan oluşturma araçlarını sunan güncel Canvas uygulaması gerekir. `canvas_get_assistant`, `canvas_create_assistant` ve `canvas_export_assistant` araçlarının görünmesini kontrol edin. Eklentiyi güncellemek çalışan Canvas uygulamasına yeni araç eklemez; yeni uygulama sürümünü açıp MCP bağlantısını yenileyin. Yeni araçlar gelene kadar proje okuma işlemleri çalışabilir. Profil klasörüne elle yazarak veya kurulu eklenti cache'ini değiştirerek bağlantıyı aşmaya çalışmayın.
+
+## Kişisel asistan silinemiyor
+
+Kişisel paket silme için eklenti 1.3.0 ve `canvas_delete_assistant` aracını sunan güncel Canvas gerekir. `canvas_list_agents` sonucunda `origin: "personal"` ve `canDelete: true` olmalıdır; MCP ile oluşturulan paketler de kişiseldir. Hazır paketler `assistant_protected` ile korunur. `assistant_not_found`, paketin zaten kaldırılmış veya kimliğin yanlış olabileceğini gösterir; listeyi yenileyin. Silme dışarı aktarılan `.flowast` dosyalarını, proje node'larını, çıktıları ve başlamış işleri kaldırmaz.
 
 ## Asistan kimliği veya dışarı aktarma dosyası zaten var
 
