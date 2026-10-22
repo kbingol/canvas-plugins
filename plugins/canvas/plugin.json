@@ -1,0 +1,43 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "canvas",
+  "version": "1.0.0",
+  "description": "Read open projects, node text, connections, and available agent definitions from the local Canvas desktop app.",
+  "author": {
+    "name": "Algomim"
+  },
+  "repository": "https://github.com/kbingol/canvas-plugins",
+  "license": "MIT",
+  "keywords": [
+    "canvas",
+    "local",
+    "projects",
+    "nodes",
+    "mcp"
+  ],
+  "extensions": {
+    "com.openai": {
+      "requires_local_executor": true,
+      "onboardingSkill": "./skills/setup/SKILL.md",
+      "interface": {
+        "displayName": "Canvas",
+        "shortDescription": "Read your local Canvas",
+        "longDescription": "Explore open projects in Canvas: read node text previews and connections, and inspect the available agent definitions. Canvas must be running on the same Windows computer with MCP enabled. This connection is read-only: it cannot edit projects, execute agents, generate content, or return complete image, video, or document files. The package connects to the default local endpoint; setup explains how to connect an existing custom profile.",
+        "developerName": "Algomim",
+        "category": "Productivity",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "Summarize the active project in Canvas.",
+          "Explain the connections between nodes in my Canvas project.",
+          "Which agent definitions are available in Canvas?"
+        ],
+        "composerIcon": "./assets/icon.svg",
+        "composerIconDark": "./assets/icon-dark.svg",
+        "logo": "./assets/icon.svg",
+        "logoDark": "./assets/icon-dark.svg"
+      }
+    }
+  }
+}

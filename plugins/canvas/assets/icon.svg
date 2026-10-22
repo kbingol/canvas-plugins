@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none">
+  <title>Canvas</title>
+  <g stroke="#202020" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M54 40h4c18 0 0 48 18 48"/>
+    <rect x="12" y="20" width="42" height="40" rx="9"/>
+    <rect x="76" y="68" width="40" height="40" rx="9"/>
+  </g>
+</svg>

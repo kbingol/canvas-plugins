@@ -1,0 +1,15 @@
+# Local dependency installs and generated validation/release output
+node_modules/
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+artifacts/
+coverage/
+.test-*/
+.test-home/
+.codex-home/
+*.log
+*.zip
+.DS_Store
+Thumbs.db
