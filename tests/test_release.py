@@ -31,6 +31,7 @@ class ReleaseChecks(unittest.TestCase):
                 self.assertIn("skills/setup/SKILL.md", archive.namelist())
                 self.assertIn("skills/assistant-authoring/SKILL.md", archive.namelist())
                 self.assertIn("skills/assistant-authoring/references/definition.md", archive.namelist())
+                self.assertIn("skills/canvas/references/flow-editing.md", archive.namelist())
                 for name in archive.namelist():
                     self.assertFalse(name.startswith(("/", "\\")))
                     self.assertNotIn("..", Path(name).parts)

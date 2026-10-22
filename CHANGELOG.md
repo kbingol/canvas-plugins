@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.0
+
+- Add flow authoring and editing through `canvas_edit_project` in the active open Canvas project.
+- Create text/assistant/empty-media nodes, connect typed ports, update editable text inputs and move nodes in one validated transaction.
+- Use expected revisions and request receipts to reject stale edits and replay exact retries without duplicates.
+- Extend isolated HTTP diagnostics to nine tools with destructive and idempotent graph-edit annotations; live diagnostics remain read-only.
+- Keep assistant execution, media generation, asset imports and node/wire removal outside this tool.
+
 ## 1.3.0
 
 - Add user-requested personal assistant deletion through `canvas_delete_assistant`; app-provided bundled assistants are protected.

@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "canvas",
-  "version": "1.3.0",
-  "description": "Read local Canvas projects and create, export or delete personal assistant packages through the running desktop app.",
+  "version": "1.4.0",
+  "description": "Read and edit flows in open Canvas projects and manage assistant packages through the running desktop app.",
   "author": {
     "name": "Algomim"
   },
@@ -21,8 +21,8 @@
       "onboardingSkill": "./skills/setup/SKILL.md",
       "interface": {
         "displayName": "Canvas",
-        "shortDescription": "Canvas projects and assistants",
-        "longDescription": "Explore open Canvas projects, node text previews, connections, and available agent definitions. Create an assistant from instructions and skills, save it to Canvas's local user assistant folder, export installed assistants as .flowast packages, and remove personal packages when requested. Assistant lists distinguish bundled and personal installations; bundled packages are protected from deletion. Canvas must be running on the same Windows computer with MCP enabled at its fixed local endpoint. Assistant creation, export and deletion write package files; project access remains read-only. The connection cannot edit projects, execute assistants, generate media, or return original asset files. No manual client configuration is required.",
+        "shortDescription": "Canvas flows and assistants",
+        "longDescription": "Explore open Canvas projects and build flows with text and assistant nodes, positions, and typed connections. Edit existing node text and positions without running assistants. Create assistant packages from instructions and skills, export installed assistants as .flowast files, and remove personal packages when requested. Canvas must be running on the same Windows computer with MCP enabled at its fixed local endpoint. The connection cannot execute assistants, generate media, or return original asset files. No manual client configuration is required.",
         "developerName": "Algomim",
         "category": "Productivity",
         "capabilities": [
@@ -31,6 +31,7 @@
         ],
         "defaultPrompt": [
           "Summarize the active project in Canvas.",
+          "Create a text-to-assistant flow in the active Canvas project.",
           "Explain the connections between nodes in my Canvas project.",
           "Which agent definitions are available in Canvas?",
           "Create a Turkish translation assistant in Canvas and export it as a .flowast package."

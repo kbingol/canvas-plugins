@@ -71,7 +71,7 @@ def validate(root: Path = ROOT) -> dict:
         if ext.get("requires_local_executor") is not True:
             raise ValueError("Canvas must require a local executor")
         if ext["interface"]["capabilities"] != ["Read", "Write"]:
-            raise ValueError("Canvas reads projects and writes assistant packages")
+            raise ValueError("Canvas reads and edits flows and writes assistant packages")
         for field in ("composerIcon", "composerIconDark", "logo", "logoDark"):
             asset = contained_file(package, ext["interface"][field])
             if asset.suffix == ".svg":

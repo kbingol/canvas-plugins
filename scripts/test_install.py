@@ -14,10 +14,13 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import copy
 from collections import deque
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import math
+import re
 import os
 from pathlib import Path
 import queue
@@ -35,9 +38,11 @@ import uuid
 
 CANONICAL_ENDPOINT = "http://127.0.0.1:47321/mcp"
 READ_TOOLS = frozenset(("canvas_get_status", "canvas_list_projects", "canvas_get_project", "canvas_list_agents", "canvas_get_assistant"))
-WRITE_TOOLS = frozenset(("canvas_create_assistant", "canvas_export_assistant", "canvas_delete_assistant"))
+WRITE_TOOLS = frozenset(("canvas_create_assistant", "canvas_export_assistant", "canvas_delete_assistant", "canvas_edit_project"))
+DESTRUCTIVE_TOOLS = frozenset(("canvas_delete_assistant", "canvas_edit_project"))
+IDEMPOTENT_TOOLS = READ_TOOLS | {"canvas_edit_project"}
 TOOLS = READ_TOOLS | WRITE_TOOLS
-PRE_DELETE_TOOLS = TOOLS - {"canvas_delete_assistant"}
+PRE_DELETE_TOOLS = TOOLS - {"canvas_delete_assistant", "canvas_edit_project"}
 PROJECT_A = "11111111-1111-4111-8111-111111111111"
 PROJECT_B = "22222222-2222-4222-8222-222222222222"
 COMMON_FLAGS = ("--disable", "remote_plugin", "--disable", "apps")
@@ -195,7 +200,7 @@ class AppServer:
     def __enter__(self) -> "AppServer":
         try:
             self.call("initialize", {
-                "clientInfo": {"name": "canvas_plugin_install_test", "title": "Canvas installation diagnostic", "version": "1.3.0"},
+                "clientInfo": {"name": "canvas_plugin_install_test", "title": "Canvas installation diagnostic", "version": "1.4.0"},
                 # Diagnostics only: mcpServer/tool/call is experimental in some CLI versions.
                 "capabilities": {"experimentalApi": True},
             })
@@ -249,18 +254,49 @@ def tool_definition(name: str) -> dict[str, Any]:
             "required": list(fields), "additionalProperties": True,
         }}
         schema["required"] = ["definition"]
+    elif name == "canvas_edit_project":
+        text = {"type": "string", "maxLength": 65536}
+        position = {"x": {"type": "number", "minimum": -10000000, "maximum": 10000000}, "y": {"type": "number", "minimum": -10000000, "maximum": 10000000}}
+        node = {"type": "object", "properties": {
+            "key": {"type": "string", "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,63}$"},
+            "kind": {"type": "string", "enum": ["text", "assistant", "image", "video"]},
+            **position, "text": text, "assistantId": {"type": "string"}},
+            "required": ["key", "kind", "x", "y"], "additionalProperties": False}
+        connection = {"type": "object", "properties": {
+            key: {"type": "string"} for key in ("source", "target", "sourcePortId", "targetPortId")},
+            "required": ["source", "target"], "additionalProperties": False}
+        update = {"type": "object", "properties": {"nodeId": {"type": "string", "format": "uuid"}, "text": text},
+                  "required": ["nodeId", "text"], "additionalProperties": False}
+        move = {"type": "object", "properties": {"nodeId": {"type": "string", "format": "uuid"}, **position},
+                "required": ["nodeId", "x", "y"], "additionalProperties": False}
+        schema["properties"] = {"sessionId": {"type": "string", "format": "uuid"}, "edit": {
+            "type": "object", "properties": {
+                "requestId": {"type": "string", "format": "uuid"}, "expectedRevision": {"type": "integer", "minimum": 0},
+                **{key: {"type": "array", "maxItems": maximum, "items": item}
+                   for key, maximum, item in (("nodes", 100, node), ("connections", 200, connection),
+                                               ("textUpdates", 100, update), ("moves", 100, move))}},
+            "required": ["requestId", "expectedRevision"], "additionalProperties": False}}
+        schema["required"] = ["sessionId", "edit"]
     read_only = name in READ_TOOLS
     return {
         "name": name, "description": "In-memory Canvas installation-test fixture: " + name,
         "inputSchema": schema,
-        "annotations": {"readOnlyHint": read_only, "destructiveHint": name == "canvas_delete_assistant", "idempotentHint": read_only, "openWorldHint": False},
+        "annotations": {"readOnlyHint": read_only, "destructiveHint": name in DESTRUCTIVE_TOOLS, "idempotentHint": name in IDEMPOTENT_TOOLS, "openWorldHint": False},
     }
 
 
-def fixture_project(session: str) -> dict[str, Any]:
+def fixture_project(session: str, revision: int = 7, nodes: int = 2, edges: int = 2) -> dict[str, Any]:
     return {"sessionId": session, "title": "Same project title", "projectPath": "fixture.flow",
             "isActive": session == PROJECT_A, "isLoaded": True, "isClosing": False,
-            "revision": 7, "nodeCount": 2, "edgeCount": 2}
+            "revision": revision, "nodeCount": nodes, "edgeCount": edges}
+
+
+def fixture_node_ports(kind: str) -> dict[str, Any]:
+    if kind == "ImageGenerator":
+        port = {"id": "context", "name": "Context", "kind": "Context", "required": False, "multiple": True, "maxItems": None}
+        return {"inputPorts": [port], "outputPorts": [{**port, "required": True}]}
+    port = {"id": "value", "name": kind, "kind": kind, "required": False, "multiple": False, "maxItems": None}
+    return {"inputPorts": [port], "outputPorts": [port.copy()]}
 
 
 class McpFixture:
@@ -276,6 +312,15 @@ class McpFixture:
         }}
         self.exports: set[str] = set()
         self.personal_assistants: set[str] = set()
+        self.projects = {}
+        self.edit_receipts: dict[tuple[str, str], tuple[str, dict[str, Any]]] = {}
+        for session in (PROJECT_A, PROJECT_B):
+            values = [{"id": str(uuid.uuid5(uuid.UUID(session), f"node:{i}")), "kind": "Text", "x": i, "y": 0,
+                       "text": f"{session} node {i}", "textTruncated": False, "agentId": None, "agentName": None,
+                       "state": "Idle", "assetId": None, **fixture_node_ports("Text")} for i in range(2)]
+            edges = [{"id": str(uuid.uuid5(uuid.UUID(session), f"edge:{i}")), "sourceId": values[0]["id"],
+                      "targetId": values[1]["id"], "sourcePortId": None, "targetPortId": None} for i in range(2)]
+            self.projects[session] = {"revision": 7, "nodes": values, "edges": edges}
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -354,11 +399,12 @@ class McpFixture:
         if name == "canvas_get_status":
             value = {"instanceId": PROJECT_A, "apiVersion": 1, "application": "Canvas", "isClosing": False, "capabilities": sorted(TOOLS)}
         elif name == "canvas_list_projects":
-            value = {"projects": [fixture_project(PROJECT_A), fixture_project(PROJECT_B)]}
+            value = {"projects": [self.project_summary(session) for session in (PROJECT_A, PROJECT_B)]}
         elif name == "canvas_list_agents":
             with self.lock:
                 value = {"agents": [{**{key: item[key] for key in ("id", "pluginId", "version", "name")},
-                                     "inputs": [], "outputs": [],
+                                     "inputs": [{"id": "context", "name": "Context", "kind": "Context", "required": False, "multiple": True, "maxItems": None}],
+                                     "outputs": [{"id": "context", "name": "Context", "kind": "Context", "required": True, "multiple": True, "maxItems": None}],
                                      "origin": "personal" if item["id"] in self.personal_assistants else "bundled",
                                      "canDelete": item["id"] in self.personal_assistants} for item in self.assistants.values()]}
         elif name == "canvas_get_assistant":
@@ -419,14 +465,154 @@ class McpFixture:
             if error:
                 value = {"error": {"code": error, "message": "Use a live sessionId from canvas_list_projects."}}
             else:
-                values = [{"id": f"{session}:{i}", "kind": "Note", "x": i, "y": 0, "text": f"{session} node {i}", "textTruncated": False,
-                           "agentId": None, "agentName": None, "state": "Idle", "assetId": None} for i in range(2)]
-                edges = [{"id": f"edge:{i}", "sourceId": values[0]["id"], "targetId": values[1]["id"], "sourcePortId": None, "targetPortId": None} for i in range(2)]
-                value = {"project": fixture_project(session), "offset": offset, "limit": limit, "nodes": values[offset:offset + limit],
-                         "edges": edges[offset:offset + limit], "hasMoreNodes": offset + limit < len(values), "hasMoreEdges": offset + limit < len(edges)}
+                with self.lock:
+                    state = self.projects[session]
+                    values, edges = state["nodes"], state["edges"]
+                    value = {"project": self.project_summary(session), "offset": offset, "limit": limit,
+                             "nodes": copy.deepcopy(values[offset:offset + limit]), "edges": copy.deepcopy(edges[offset:offset + limit]),
+                             "hasMoreNodes": offset + limit < len(values), "hasMoreEdges": offset + limit < len(edges)}
+        elif name == "canvas_edit_project":
+            value, error = self.edit_project(arguments)
         else:
             value, error = {"error": {"code": "unknown_method"}}, "unknown_method"
         return {"content": [{"type": "text", "text": json.dumps(value)}], "structuredContent": value, "isError": bool(error)}
+
+
+    def project_summary(self, session: str) -> dict[str, Any]:
+        state = self.projects[session]
+        return fixture_project(session, state["revision"], len(state["nodes"]), len(state["edges"]))
+
+    def edit_project(self, arguments: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
+        """In-memory transaction fixture; production validation belongs to Canvas."""
+        def fail(code: str) -> tuple[dict[str, Any], str]:
+            return {"error": {"code": code}}, code
+
+        def valid_guid(value: Any) -> bool:
+            try:
+                return isinstance(value, str) and uuid.UUID(value).int != 0
+            except ValueError:
+                return False
+
+        def valid_position(item: Any) -> bool:
+            return all(isinstance(item.get(key), (int, float)) and not isinstance(item[key], bool)
+                       and math.isfinite(item[key]) and abs(item[key]) <= 10000000 for key in ("x", "y"))
+
+        def valid_text(value: Any) -> bool:
+            return isinstance(value, str) and len(value.encode("utf-16-le", errors="surrogatepass")) <= 131072
+
+        session, edit = arguments.get("sessionId"), arguments.get("edit")
+        if not valid_guid(session) or not isinstance(edit, dict) or not valid_guid(edit.get("requestId")):
+            return fail("invalid_argument")
+        revision = edit.get("expectedRevision")
+        if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
+            return fail("invalid_argument")
+        arrays = {key: edit.get(key, []) for key in ("nodes", "connections", "textUpdates", "moves")}
+        if any(not isinstance(value, list) for value in arrays.values()):
+            return fail("invalid_argument")
+        if any(len(arrays[key]) > maximum for key, maximum in (("nodes", 100), ("connections", 200), ("textUpdates", 100), ("moves", 100))):
+            return fail("invalid_argument")
+        if not 1 <= sum(map(len, arrays.values())) <= 500:
+            return fail("invalid_argument")
+        if any(not isinstance(item, dict) for values in arrays.values() for item in values):
+            return fail("invalid_argument")
+        fingerprint = json.dumps(edit, sort_keys=True, separators=(",", ":"))
+        receipt_key = (session, edit["requestId"])
+        with self.lock:
+            if session not in self.projects:
+                return fail("project_not_found")
+            if receipt_key in self.edit_receipts:
+                previous, receipt = self.edit_receipts[receipt_key]
+                if previous != fingerprint:
+                    return fail("request_conflict")
+                return {**copy.deepcopy(receipt), "replayed": True}, None
+            if session != PROJECT_A:
+                return fail("project_not_active")
+            state = self.projects[session]
+            if state["revision"] != revision:
+                return fail("revision_conflict")
+            staged = copy.deepcopy(state)
+            node_by_id = {item["id"]: item for item in staged["nodes"]}
+            new_nodes, new_edges, aliases = [], [], {}
+            total_text_units = 0
+            for item in arrays["nodes"]:
+                key, kind = item.get("key"), item.get("kind")
+                text = item.get("text", "")
+                if not isinstance(key, str) or not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_-]{0,63}", key) or key in aliases:
+                    return fail("invalid_argument")
+                if kind not in {"text", "assistant", "image", "video"} or not valid_position(item) or not valid_text(text):
+                    return fail("invalid_argument")
+                assistant_id = item.get("assistantId")
+                if (kind != "text" and item.get("text") is not None) or (kind != "assistant" and assistant_id is not None):
+                    return fail("invalid_argument")
+                if kind == "assistant" and assistant_id not in self.assistants:
+                    return fail("agent_unavailable")
+                total_text_units += len(text.encode("utf-16-le", errors="surrogatepass")) // 2
+                node = {"id": str(uuid.uuid4()), "kind": {"text": "Text", "assistant": "ImageGenerator", "image": "Image", "video": "Video"}[kind],
+                        "x": item["x"], "y": item["y"], "text": text, "textTruncated": False,
+                        "agentId": assistant_id if kind == "assistant" else None,
+                        "agentName": self.assistants[assistant_id]["name"] if kind == "assistant" else None,
+                        "state": "Idle", "assetId": None, **fixture_node_ports("ImageGenerator" if kind == "assistant" else kind.title())}
+                aliases[key] = node["id"]
+                node_by_id[node["id"]] = node
+                staged["nodes"].append(node)
+                new_nodes.append({"key": key, "node": node})
+            changed = bool(new_nodes)
+            existing_ids = {item["id"] for item in state["nodes"]}
+            for item in arrays["textUpdates"]:
+                node = node_by_id.get(item.get("nodeId")) if item.get("nodeId") in existing_ids else None
+                if node is None:
+                    return fail("node_not_found")
+                if node["kind"] != "Text" or any(edge["targetId"] == node["id"] for edge in staged["edges"]) or any(aliases.get(wire.get("target"), wire.get("target")) == node["id"] for wire in arrays["connections"]):
+                    return fail("node_not_editable")
+                if not valid_text(item.get("text")):
+                    return fail("invalid_argument")
+                total_text_units += len(item["text"].encode("utf-16-le", errors="surrogatepass")) // 2
+                changed = changed or node["text"] != item["text"]
+                node["text"] = item["text"]
+            if total_text_units > 262144:
+                return fail("invalid_argument")
+            for item in arrays["moves"]:
+                node = node_by_id.get(item.get("nodeId")) if item.get("nodeId") in existing_ids else None
+                if node is None:
+                    return fail("node_not_found")
+                if not valid_position(item):
+                    return fail("invalid_argument")
+                changed = changed or (node["x"], node["y"]) != (item["x"], item["y"])
+                node.update(x=item["x"], y=item["y"])
+            for item in arrays["connections"]:
+                source = node_by_id.get(aliases.get(item.get("source"), item.get("source")))
+                target = node_by_id.get(aliases.get(item.get("target"), item.get("target")))
+                if source is None or target is None:
+                    return fail("node_not_found")
+                if source is target:
+                    return fail("invalid_connection")
+                for port, node in (("sourcePortId", source), ("targetPortId", target)):
+                    if node["kind"] == "ImageGenerator" and item.get(port) not in {None, "context"}:
+                        return fail("invalid_connection")
+                    if node["kind"] != "ImageGenerator" and item.get(port) not in {None, "value"}:
+                        return fail("invalid_connection")
+                if target["kind"] != "ImageGenerator":
+                    if source["kind"] != target["kind"] or any(edge["targetId"] == target["id"] for edge in staged["edges"]):
+                        return fail("invalid_connection")
+                source_port = "context" if source["kind"] == "ImageGenerator" else "value"
+                target_port = "context" if target["kind"] == "ImageGenerator" else "value"
+                if any((edge["sourceId"], edge["targetId"], edge["sourcePortId"], edge["targetPortId"])
+                       == (source["id"], target["id"], source_port, target_port) for edge in staged["edges"]):
+                    return fail("invalid_connection")
+                edge = {"id": str(uuid.uuid4()), "sourceId": source["id"], "targetId": target["id"],
+                        "sourcePortId": source_port, "targetPortId": target_port}
+                staged["edges"].append(edge)
+                new_edges.append(edge)
+                changed = True
+            staged["revision"] += int(changed)
+            receipt = {"sessionId": session, "requestId": edit["requestId"], "revision": staged["revision"],
+                       "nodes": new_nodes, "edges": new_edges, "changed": changed, "replayed": False}
+            self.projects[session] = staged
+            self.edit_receipts[receipt_key] = (fingerprint, copy.deepcopy(receipt))
+            session_receipts = [key for key in self.edit_receipts if key[0] == session]
+            for key in session_receipts[:-128]:
+                del self.edit_receipts[key]
+            return receipt, None
 
 
 def structured(result: dict[str, Any]) -> Any:
@@ -452,12 +638,12 @@ def offline_check(codex: str, environment: dict[str, str], cwd: Path) -> dict[st
         return {"unavailableReported": True, "toolsReturned": len(item["tools"])}
 
 
-def discover_canvas(server: AppServer, thread_id: str | None = None, require_deletion: bool = True) -> dict[str, Any]:
+def discover_canvas(server: AppServer, thread_id: str | None = None, require_current: bool = True) -> dict[str, Any]:
     params: dict[str, Any] = {"detail": "full"}
     if thread_id:
         params["threadId"] = thread_id
     inventory = server.call("mcpServerStatus/list", params)
-    required = TOOLS if require_deletion else PRE_DELETE_TOOLS
+    required = TOOLS if require_current else PRE_DELETE_TOOLS
     matches = [item for item in inventory["data"] if required.issubset(set(item.get("tools", {})))]
     check(len(matches) == 1, f"Expected one connected Canvas server with {len(required)} required tools; inventory: {inventory}")
     result = matches[0]
@@ -466,8 +652,10 @@ def discover_canvas(server: AppServer, thread_id: str | None = None, require_del
         tool = result["tools"][name]
         check(tool.get("annotations", {}).get("readOnlyHint") is (name in READ_TOOLS),
               f"Tool must advertise its actual read/write behavior: {name}")
-        check(tool.get("annotations", {}).get("destructiveHint") is (name == "canvas_delete_assistant"),
-              f"Only personal-package deletion must advertise destructive behavior: {name}")
+        check(tool.get("annotations", {}).get("destructiveHint") is (name in DESTRUCTIVE_TOOLS),
+              f"Tool must advertise its actual destructive behavior: {name}")
+        check(tool.get("annotations", {}).get("idempotentHint") is (name in IDEMPOTENT_TOOLS),
+              f"Tool must advertise its actual retry behavior: {name}")
     return result
 
 
@@ -483,7 +671,7 @@ def engine_checks(codex: str, environment: dict[str, str], cwd: Path, selector: 
         # thread/start creates only an empty, ephemeral context. No turn is run.
         thread = server.call("thread/start", {"cwd": str(cwd), "ephemeral": True, "sandbox": "read-only", "approvalPolicy": "never"})
         thread_id = thread["thread"]["id"]
-        inventory = discover_canvas(server, thread_id, require_deletion=fixture is not None)
+        inventory = discover_canvas(server, thread_id, require_current=fixture is not None)
         origin = urlsplit(endpoint)
         check(inventory.get("httpOrigin") == f"{origin.scheme}://{origin.netloc}", "MCP loaded a different HTTP origin")
         check(endpoint == CANONICAL_ENDPOINT and inventory["name"] == "canvas",
@@ -504,6 +692,7 @@ def engine_checks(codex: str, environment: dict[str, str], cwd: Path, selector: 
         check(not agents.get("isError") and isinstance(structured(agents)["agents"], list), "Canvas agent listing failed")
         project_checks = 0
         authoring_checks = 0
+        flow_checks = 0
         if fixture:
             check(len(projects) == 2 and projects[0]["title"] == projects[1]["title"], "Fixture must exercise duplicate project titles")
             selected = next(project for project in projects if not project["isActive"])
@@ -518,6 +707,43 @@ def engine_checks(codex: str, environment: dict[str, str], cwd: Path, selector: 
             check(stale.get("isError") is True and structured(stale)["error"]["code"] == "project_not_found", "Stale session error was lost by the client")
             project_checks = 4
             # Writes below affect only this fixture's in-memory dictionaries.
+            flow = {"requestId": str(uuid.uuid4()), "expectedRevision": 7,
+                    "nodes": [{"key": "source", "kind": "text", "x": 300, "y": 200, "text": "Translate this text."},
+                              {"key": "agent", "kind": "assistant", "x": 650, "y": 200, "assistantId": "fixture-agent"}],
+                    "connections": [{"source": "source", "target": "agent", "targetPortId": "context"}]}
+            edit_args = {"sessionId": PROJECT_A, "edit": flow}
+            edited = call("canvas_edit_project", edit_args)
+            receipt = structured(edited)
+            check(not edited.get("isError") and receipt["changed"] and receipt["revision"] == 8,
+                  "Flow transaction did not cross the installed MCP connection")
+            check(len(receipt["nodes"]) == 2 and len(receipt["edges"]) == 1, "Flow edit receipt lost new node aliases or wires")
+            replayed = call("canvas_edit_project", edit_args)
+            check(not replayed.get("isError") and structured(replayed)["replayed"] and structured(replayed)["revision"] == 8,
+                  "Exact transaction retry must replay its receipt without duplicates")
+            conflicting = call("canvas_edit_project", {"sessionId": PROJECT_A, "edit": {**flow, "expectedRevision": 8}})
+            check(conflicting.get("isError") and structured(conflicting)["error"]["code"] == "request_conflict",
+                  "Changing a used request payload must remain a conflict")
+            stale_edit = call("canvas_edit_project", {"sessionId": PROJECT_A, "edit": {**flow, "requestId": str(uuid.uuid4())}})
+            check(stale_edit.get("isError") and structured(stale_edit)["error"]["code"] == "revision_conflict",
+                  "Stale project revisions must be rejected")
+            failed_edit = call("canvas_edit_project", {"sessionId": PROJECT_A, "edit": {
+                "requestId": str(uuid.uuid4()), "expectedRevision": 8,
+                "nodes": [{"key": "temporary", "kind": "text", "x": 0, "y": 0, "text": "Must not appear"}],
+                "connections": [{"source": "temporary", "target": str(uuid.uuid4())}]}})
+            snapshot = structured(call("canvas_get_project", {"sessionId": PROJECT_A}))
+            check(failed_edit.get("isError") and snapshot["project"]["revision"] == 8 and len(snapshot["nodes"]) == 4,
+                  "Failed flow transactions must leave the graph unchanged")
+            ids = {item["key"]: item["node"]["id"] for item in receipt["nodes"]}
+            updated = call("canvas_edit_project", {"sessionId": PROJECT_A, "edit": {
+                "requestId": str(uuid.uuid4()), "expectedRevision": 8,
+                "textUpdates": [{"nodeId": ids["source"], "text": "Updated translation input."}],
+                "moves": [{"nodeId": ids["agent"], "x": 800, "y": 220}]}})
+            final = structured(call("canvas_get_project", {"sessionId": PROJECT_A}))
+            check(not updated.get("isError") and final["project"]["revision"] == 9
+                  and next(item for item in final["nodes"] if item["id"] == ids["source"])["text"] == "Updated translation input."
+                  and next(item for item in final["nodes"] if item["id"] == ids["agent"])["x"] == 800,
+                  "Existing node text and positions must round-trip through the connection")
+            flow_checks = 6
             original = call("canvas_get_assistant", {"assistantId": "fixture-agent"})
             check(not original.get("isError") and structured(original)["instructions"], "Assistant definition inspection failed")
             definition = {"id": "user.install-check", "pluginId": "user.assistant.install-check", "name": "Install check",
@@ -557,7 +783,8 @@ def engine_checks(codex: str, environment: dict[str, str], cwd: Path, selector: 
         return {"serverName": inventory["name"], "pluginId": inventory.get("pluginId"),
                 "toolCount": len(inventory["tools"]), "bundledSkillNames": [skill["name"] for skill in bundled],
                 "personalDeletionAvailable": "canvas_delete_assistant" in inventory["tools"],
-                "projectChecks": project_checks, "fixtureAuthoringChecks": authoring_checks, "modelTurns": 0}
+                "flowEditingAvailable": "canvas_edit_project" in inventory["tools"],
+                "projectChecks": project_checks, "fixtureAuthoringChecks": authoring_checks, "fixtureFlowChecks": flow_checks, "modelTurns": 0}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -624,7 +851,7 @@ def main(argv: list[str] | None = None) -> int:
                 methods = {request["method"] for request in fixture.calls}
                 tools_called = {request["params"]["name"] for request in fixture.calls if request["method"] == "tools/call"}
                 check({"initialize", "tools/list", "tools/call"}.issubset(methods), "Fixture did not observe a real MCP handshake and tool call")
-                check(tools_called == TOOLS, "Client did not call all eight Canvas tools")
+                check(tools_called == TOOLS, "Client did not call all nine Canvas tools")
                 report["fixture"] = {"endpoint": endpoint, "toolsCalled": sorted(tools_called), "requestCount": len(fixture.calls)}
             report["offline"] = offline_check(args.codex, environment, cwd)
             with McpFixture() as recovered:

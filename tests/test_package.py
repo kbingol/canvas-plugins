@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
+import copy
 import json
 from pathlib import Path
 import tempfile
 import unittest
+import uuid
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -57,7 +59,7 @@ class PackageChecks(unittest.TestCase):
         self.assertNotIn("env", server)
         self.assertNotIn("oauth", server)
 
-    def test_skills_cover_workspace_reads_and_assistant_authoring(self):
+    def test_skills_cover_workspace_reads_flow_edits_and_assistant_authoring(self):
         files = list((self.plugin_root / "skills").glob("*/SKILL.md"))
         self.assertTrue(files, "Canvas skill must be included")
         combined = "\n".join(path.read_text(encoding="utf-8") for path in files)
@@ -69,7 +71,7 @@ class PackageChecks(unittest.TestCase):
         for name in install.TOOLS:
             self.assertIn(name, combined)
         self.assertIn("sessionId", combined)
-        self.assertRegex(combined.lower(), r"read.only")
+        self.assertTrue((self.plugin_root / "skills/canvas/references/flow-editing.md").is_file())
         self.assertRegex(combined.lower(), r"(pagination|offset|page)")
 
     def test_release_contains_no_credentials_user_paths_or_generated_state(self):
@@ -104,7 +106,8 @@ class FixtureContractChecks(unittest.TestCase):
             self.assertEqual({tool["name"] for tool in tools}, install.TOOLS)
             for tool in tools:
                 self.assertEqual(tool["annotations"]["readOnlyHint"], tool["name"] in install.READ_TOOLS)
-                self.assertEqual(tool["annotations"]["destructiveHint"], tool["name"] == "canvas_delete_assistant")
+                self.assertEqual(tool["annotations"]["destructiveHint"], tool["name"] in install.DESTRUCTIVE_TOOLS)
+                self.assertEqual(tool["annotations"]["idempotentHint"], tool["name"] in install.IDEMPOTENT_TOOLS)
 
     def test_assistant_create_inspect_and_export_cross_the_http_connection(self):
         with install.McpFixture(0) as fixture:
@@ -157,7 +160,7 @@ class FixtureContractChecks(unittest.TestCase):
                     name: install.tool_definition(name) for name in install.PRE_DELETE_TOOLS
                 }}]}
 
-        result = install.discover_canvas(SevenToolServer(), require_deletion=False)
+        result = install.discover_canvas(SevenToolServer(), require_current=False)
         self.assertNotIn("canvas_delete_assistant", result["tools"])
         with self.assertRaises(install.CheckFailure):
             install.discover_canvas(SevenToolServer())
@@ -182,6 +185,89 @@ class FixtureContractChecks(unittest.TestCase):
                 result = self.rpc(fixture.endpoint, "tools/call", {"name": "canvas_get_project", "arguments": {"sessionId": session}})[1]["result"]
                 self.assertTrue(result["isError"])
                 self.assertEqual(install.structured(result)["error"]["code"], expected)
+
+    def test_flow_transaction_round_trips_ids_text_positions_and_exact_retry(self):
+        with install.McpFixture(0) as fixture:
+            def call(name, arguments):
+                return self.rpc(fixture.endpoint, "tools/call", {"name": name, "arguments": arguments})[1]["result"]
+
+            before = install.structured(call("canvas_get_project", {"sessionId": install.PROJECT_A}))
+            flow = {"requestId": str(uuid.uuid4()), "expectedRevision": before["project"]["revision"],
+                    "nodes": [{"key": "input", "kind": "text", "x": 300, "y": 200, "text": "Test source"},
+                              {"key": "assistant", "kind": "assistant", "x": 650, "y": 200, "assistantId": "fixture-agent"},
+                              {"key": "empty", "kind": "image", "x": 1000, "y": 200}],
+                    "connections": [{"source": "input", "target": "assistant", "targetPortId": "context"}]}
+            arguments = {"sessionId": install.PROJECT_A, "edit": flow}
+            created = call("canvas_edit_project", arguments)
+            self.assertFalse(created["isError"])
+            receipt = install.structured(created)
+            self.assertEqual(receipt["requestId"], flow["requestId"])
+            self.assertEqual(receipt["revision"], 8)
+            self.assertTrue(receipt["changed"])
+            self.assertFalse(receipt["replayed"])
+            ids = {item["key"]: item["node"]["id"] for item in receipt["nodes"]}
+            self.assertEqual(set(ids), {"input", "assistant", "empty"})
+            self.assertEqual(receipt["edges"][0]["sourceId"], ids["input"])
+            self.assertEqual(receipt["edges"][0]["targetId"], ids["assistant"])
+            self.assertEqual(next(item["node"] for item in receipt["nodes"] if item["key"] == "assistant")["outputPorts"][0]["id"], "context")
+            self.assertEqual(next(item["node"] for item in receipt["nodes"] if item["key"] == "input")["outputPorts"][0]["id"], "value")
+            replayed = install.structured(call("canvas_edit_project", arguments))
+            self.assertTrue(replayed["replayed"])
+            self.assertEqual(replayed["nodes"], receipt["nodes"])
+            after = install.structured(call("canvas_get_project", {"sessionId": install.PROJECT_A}))
+            self.assertEqual(len(after["nodes"]), len(before["nodes"]) + 3)
+            update = {"requestId": str(uuid.uuid4()), "expectedRevision": 8,
+                      "textUpdates": [{"nodeId": ids["input"], "text": "New text"}],
+                      "moves": [{"nodeId": ids["assistant"], "x": 700, "y": 220}]}
+            result = call("canvas_edit_project", {"sessionId": install.PROJECT_A, "edit": update})
+            self.assertFalse(result["isError"])
+            self.assertEqual(install.structured(result)["revision"], 9)
+            after = install.structured(call("canvas_get_project", {"sessionId": install.PROJECT_A}))
+            self.assertEqual(next(item for item in after["nodes"] if item["id"] == ids["input"])["text"], "New text")
+            self.assertEqual(next(item for item in after["nodes"] if item["id"] == ids["assistant"])["x"], 700)
+
+    def test_flow_conflicts_bad_connections_and_inactive_sessions_leave_graph_intact(self):
+        with install.McpFixture(0) as fixture:
+            def call(edit, session=install.PROJECT_A):
+                return self.rpc(fixture.endpoint, "tools/call", {"name": "canvas_edit_project", "arguments": {"sessionId": session, "edit": edit}})[1]["result"]
+
+            original = copy.deepcopy(fixture.projects)
+            def edit(**changes):
+                return {"requestId": str(uuid.uuid4()), "expectedRevision": 7, "nodes": [{"key": "default", "kind": "text", "x": 0, "y": 0}], **changes}
+
+            invalid = edit(nodes=[{"key": "input", "kind": "text", "x": 0, "y": 0}],
+                           connections=[{"source": "input", "target": str(uuid.uuid4())}])
+            cases = [(invalid, "node_not_found", install.PROJECT_A),
+                     (edit(expectedRevision=6), "revision_conflict", install.PROJECT_A),
+                     (edit(), "project_not_active", install.PROJECT_B),
+                     (edit(nodes=[{"key": "missing", "kind": "assistant", "assistantId": "missing", "x": 0, "y": 0}]), "agent_unavailable", install.PROJECT_A),
+                     (edit(nodes=[{"key": "input", "kind": "text", "x": 0, "y": 0}],
+                           connections=[{"source": "input", "target": "input"}]), "invalid_connection", install.PROJECT_A)]
+            for payload, code, session in cases:
+                with self.subTest(code=code):
+                    result = call(payload, session)
+                    self.assertTrue(result["isError"])
+                    self.assertEqual(install.structured(result)["error"]["code"], code)
+                    self.assertEqual(fixture.projects, original)
+            success = edit(nodes=[{"key": "first", "kind": "text", "x": 0, "y": 0}])
+            self.assertFalse(call(success)["isError"])
+            committed = copy.deepcopy(fixture.projects)
+            conflict = {**success, "moves": [{"nodeId": str(uuid.uuid4()), "x": 10, "y": 20}]}
+            result = call(conflict)
+            self.assertEqual(install.structured(result)["error"]["code"], "request_conflict")
+            self.assertEqual(fixture.projects, committed)
+
+    def test_flow_tool_schema_advertises_typed_batch_and_retry_annotations(self):
+        definition = install.tool_definition("canvas_edit_project")
+        self.assertEqual(definition["annotations"], {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": False})
+        schema = definition["inputSchema"]
+        self.assertEqual(schema["required"], ["sessionId", "edit"])
+        edit = schema["properties"]["edit"]
+        self.assertEqual(edit["required"], ["requestId", "expectedRevision"])
+        self.assertEqual(set(edit["properties"]), {"requestId", "expectedRevision", "nodes", "connections", "textUpdates", "moves"})
+        self.assertEqual(edit["properties"]["nodes"]["items"]["properties"]["kind"]["enum"], ["text", "assistant", "image", "video"])
+        for field, maximum in (("nodes", 100), ("connections", 200), ("textUpdates", 100), ("moves", 100)):
+            self.assertEqual(edit["properties"][field]["maxItems"], maximum)
 
     def test_browser_origin_is_rejected(self):
         with install.McpFixture(0) as fixture:

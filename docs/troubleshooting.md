@@ -25,6 +25,14 @@ Bu komut katalog kaynağını yeniler. Eklentinin kurulu sürümünü ayrıca ko
 
 Önce Canvas'ta bir proje açın. Araçlar yalnızca çalışan uygulamadaki açık proje oturumlarını okur; diskteki bütün `.flow` dosyalarını taramaz. Projeyi kapatıp yeniden açtıysanız yeni oturum kimliğini almak için proje listesini tekrar isteyin.
 
+## Flow düzenleme aracı yok veya işlem reddediliyor
+
+Flow düzenleme için eklenti 1.4.0 ve `canvas_edit_project` aracını sunan güncel Canvas uygulaması gerekir. Eklentiyi güncellemek çalışan uygulamanın araçlarını değiştirmez. Güncel Canvas sürümünü açıp MCP bağlantısını yenileyin; o sırada desteklenen okuma işlemleri kullanılabilir.
+
+Yalnızca aktif proje düzenlenebilir; `project_not_active` alırsanız Canvas'ta ilgili sekmeyi seçin. `project_busy`, devam eden yerel etkileşimin bitmesini gerektirir. `revision_conflict` durumunda projeyi yeniden okuyup yeni revizyon ve yeni istek kimliğiyle düzenlemeyi hazırlayın. Yanıt kaybolursa aynı `requestId` ve aynı içerikle tekrar deneyin; yeni kimlikle körlemesine yinelemek kopya node'lar oluşturabilir. Kullanılmış istek kimliğinin içeriğini değiştirmek `request_conflict` döndürür.
+
+Araç asistanları çalıştırmaz, medya dosyası içe aktarmaz ve node veya kablo silmez. Boş görsel/video node'u, üretilmiş çıktı değildir. Asistan portlarını mevcut tanımlardan okuyun; henüz yayımlanmamış numaralı çıktı portlarını tahmin etmeyin. Geçersiz bir düzenleme tümüyle reddedilir.
+
 ## Asistan oluşturma veya dışarı aktarma araçları yok
 
 Bu işlemler için hem Canvas eklentisi 1.2.0 veya üzeri hem de asistan oluşturma araçlarını sunan güncel Canvas uygulaması gerekir. `canvas_get_assistant`, `canvas_create_assistant` ve `canvas_export_assistant` araçlarının görünmesini kontrol edin. Eklentiyi güncellemek çalışan Canvas uygulamasına yeni araç eklemez; yeni uygulama sürümünü açıp MCP bağlantısını yenileyin. Yeni araçlar gelene kadar proje okuma işlemleri çalışabilir. Profil klasörüne elle yazarak veya kurulu eklenti cache'ini değiştirerek bağlantıyı aşmaya çalışmayın.
