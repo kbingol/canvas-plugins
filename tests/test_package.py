@@ -5,7 +5,9 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -130,13 +132,24 @@ class FixtureContractChecks(unittest.TestCase):
                 urlopen(request, timeout=3)
             self.assertEqual(raised.exception.code, 403)
 
-    def test_diagnostics_reject_nonlocal_or_credential_bearing_endpoints(self):
+    def test_diagnostics_reject_every_endpoint_except_the_installed_bundle(self):
         install.validate_endpoint("http://127.0.0.1:47321/mcp")
-        for endpoint in ("https://example.com/mcp", "http://0.0.0.0:47321/mcp",
+        for endpoint in ("http://127.0.0.1:51098/mcp", "https://example.com/mcp", "http://0.0.0.0:47321/mcp",
+                         "http://localhost:47321/mcp", "http://127.0.0.1:47321/mcp/",
                          "http://127.0.0.1:47321/mcp?token=secret",
                          "http://user:secret@127.0.0.1:47321/mcp"):
             with self.subTest(endpoint=endpoint), self.assertRaises(install.CheckFailure):
                 install.validate_endpoint(endpoint)
+
+    def test_wrong_port_fails_before_install_or_configuration_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            artifacts = Path(directory) / "artifacts"
+            with patch.object(install, "run_cli") as cli, patch.object(install.subprocess, "run") as process:
+                with self.assertRaises(install.CheckFailure):
+                    install.main(["--endpoint", "http://127.0.0.1:51098/mcp", "--artifacts", str(artifacts)])
+                cli.assert_not_called()
+                process.assert_not_called()
+                self.assertFalse(artifacts.exists(), "Invalid endpoint must not create installation state")
 
 
 if __name__ == "__main__":

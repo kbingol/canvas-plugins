@@ -27,6 +27,7 @@ import sys
 import tempfile
 import threading
 import time
+import tomllib
 from typing import Any
 from urllib.parse import urlsplit
 import uuid
@@ -191,7 +192,7 @@ class AppServer:
     def __enter__(self) -> "AppServer":
         try:
             self.call("initialize", {
-                "clientInfo": {"name": "canvas_plugin_install_test", "title": "Canvas installation diagnostic", "version": "1.0.0"},
+                "clientInfo": {"name": "canvas_plugin_install_test", "title": "Canvas installation diagnostic", "version": "1.1.0"},
                 # Diagnostics only: mcpServer/tool/call is experimental in some CLI versions.
                 "capabilities": {"experimentalApi": True},
             })
@@ -365,26 +366,14 @@ def structured(result: dict[str, Any]) -> Any:
 
 
 def validate_endpoint(endpoint: str) -> None:
-    parsed = urlsplit(endpoint)
-    check(parsed.scheme == "http" and parsed.hostname == "127.0.0.1" and parsed.port is not None
-          and parsed.path == "/mcp" and not parsed.query and not parsed.fragment
-          and parsed.username is None and parsed.password is None,
-          "Endpoint must be an exact local http://127.0.0.1:PORT/mcp URL without credentials or query")
+    check(endpoint == CANONICAL_ENDPOINT,
+          f"Installation diagnostics require the bundled endpoint {CANONICAL_ENDPOINT}; endpoint overrides are not supported")
 
 
-def configure_fallback(codex: str, environment: dict[str, str], cwd: Path, endpoint: str) -> None:
-    validate_endpoint(endpoint)
-    # Exercise the same supported CLI command documented for custom profiles.
-    run_cli_process(codex, ["mcp", "add", "canvas-local", "--url", endpoint], environment, cwd)
-    config = Path(environment["CODEX_HOME"]) / "config.toml"
-    with config.open("a", encoding="utf-8") as stream:
-        stream.write('\n[plugins."canvas@canvas-plugins".mcp_servers.canvas]\nenabled = false\n')
-
-
-def offline_check(codex: str, environment: dict[str, str], cwd: Path, fallback: bool) -> dict[str, Any]:
+def offline_check(codex: str, environment: dict[str, str], cwd: Path) -> dict[str, Any]:
     with AppServer(codex, environment, cwd) as server:
         inventory = server.call("mcpServerStatus/list", {"detail": "toolsAndAuthOnly"})
-        candidates = [item for item in inventory["data"] if item["name"] == ("canvas-local" if fallback else "canvas")]
+        candidates = [item for item in inventory["data"] if item["name"] == "canvas"]
         check(len(candidates) == 1, "Offline Canvas server disappeared from configuration")
         item = candidates[0]
         check(not item["tools"] and (item.get("toolsError") or item.get("runtimeStatus") in {"failed", "notStarted"}),
@@ -421,16 +410,10 @@ def engine_checks(codex: str, environment: dict[str, str], cwd: Path, selector: 
         inventory = discover_canvas(server, thread_id)
         origin = urlsplit(endpoint)
         check(inventory.get("httpOrigin") == f"{origin.scheme}://{origin.netloc}", "MCP loaded a different HTTP origin")
-        if endpoint == CANONICAL_ENDPOINT:
-            check(inventory.get("pluginId") in {selector, "canvas"} or "canvas" in str(inventory.get("pluginId", "")),
-                  "Connected MCP must originate in the installed Canvas plugin")
-        else:
-            check(inventory["name"] == "canvas-local" and inventory.get("pluginId") is None,
-                  "Custom endpoint must use the documented direct MCP registration")
-            all_servers = server.call("mcpServerStatus/list", {"detail": "toolsAndAuthOnly", "threadId": thread_id})
-            bundled_servers = [item for item in all_servers["data"] if item.get("pluginId") == selector]
-            check(all(not item.get("tools") and item.get("runtimeStatus") in {"disabled", None} for item in bundled_servers),
-                  "The bundled default connection must be disabled while preserving plugin skills")
+        check(endpoint == CANONICAL_ENDPOINT and inventory["name"] == "canvas",
+              "Connected MCP must use the packaged fixed endpoint and server name")
+        check(inventory.get("pluginId") == selector,
+              "Connected MCP must originate in the installed Canvas plugin")
 
         def call(name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
             return server.call("mcpServer/tool/call", {"threadId": thread_id, "server": inventory["name"],
@@ -477,12 +460,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", default=str(Path(__file__).resolve().parents[1]), help="Local marketplace root or public Git repository URL")
     parser.add_argument("--codex", default=shutil.which("codex"), help="Installed Codex executable")
-    parser.add_argument("--endpoint", help="Use an already-running Canvas endpoint instead of the deterministic fixture")
-    parser.add_argument("--fixture-port", type=int, default=47321, help="Fixture port; default is the exact packaged URL. A different port requires an isolated fallback configuration")
+    parser.add_argument("--endpoint", help=f"Use an already-running Canvas app at exactly {CANONICAL_ENDPOINT} instead of the fixture")
     parser.add_argument("--artifacts", type=Path, default=Path(__file__).resolve().parents[1] / "artifacts", help="Disposable test homes and final report directory")
     args = parser.parse_args(argv)
+    # Reject unsupported URLs before creating test state or running any client
+    # command. A direct server registration would hide a broken plugin install.
+    if args.endpoint is not None:
+        validate_endpoint(args.endpoint)
     check(args.codex, "Install Codex CLI before running installation diagnostics")
-    check(0 <= args.fixture_port <= 65535, "Fixture port must be between 0 and 65535")
     args.artifacts.mkdir(parents=True, exist_ok=True)
     artifact_root = args.artifacts.resolve()
     before = user_config_snapshot()
@@ -510,32 +495,44 @@ def main(argv: list[str] | None = None) -> int:
         selector = "canvas@canvas-plugins"
         installed = run_cli(args.codex, ["plugin", "add", selector, "--json"], environment, cwd)
         report["install"] = installed
+        installed_root = Path(installed["installedPath"]).resolve()
+        check(installed_root.is_relative_to(home), "Plugin installation must stay inside the disposable home")
+        installed_manifest = read_json(installed_root / "plugin.json")
+        installed_mcp = read_json(installed_root / "mcp.json")
+        check(installed_manifest["name"] == "canvas" and installed_manifest["version"] == installed["version"],
+              "Installed plugin identity or version does not match the marketplace result")
+        check(installed_mcp["mcpServers"] == {"canvas": {"type": "streamable-http", "url": CANONICAL_ENDPOINT}},
+              "The installed bundle must retain the exact fixed HTTP server declaration")
+        installed_files = {str(path.relative_to(installed_root)): hashlib.sha256(path.read_bytes()).hexdigest()
+                           for path in installed_root.rglob("*") if path.is_file()}
         listing = run_cli(args.codex, ["plugin", "list", "--json"], environment, cwd)
         check(matching_plugins(listing), "Canvas was not present after installation")
-        endpoint = args.endpoint or f"http://127.0.0.1:{args.fixture_port}/mcp"
-        if args.endpoint:
-            validate_endpoint(endpoint)
-        if endpoint != CANONICAL_ENDPOINT and args.endpoint:
-            configure_fallback(args.codex, environment, cwd, endpoint)
+        installed_config = (home / "config.toml").read_bytes()
+        check(not tomllib.loads(installed_config.decode("utf-8")).get("mcp_servers"),
+              "Installation must not add a separate global MCP server")
+        endpoint = CANONICAL_ENDPOINT
         if args.endpoint:
             report["engine"] = engine_checks(args.codex, environment, cwd, selector, endpoint, None)
         else:
-            with McpFixture(args.fixture_port) as fixture:
-                endpoint = fixture.endpoint
-                if endpoint != CANONICAL_ENDPOINT:
-                    configure_fallback(args.codex, environment, cwd, endpoint)
+            with McpFixture() as fixture:
+                check(fixture.endpoint == endpoint, "Fixture must use the installed plugin's fixed endpoint")
                 report["engine"] = engine_checks(args.codex, environment, cwd, selector, endpoint, fixture)
                 methods = {request["method"] for request in fixture.calls}
                 tools_called = {request["params"]["name"] for request in fixture.calls if request["method"] == "tools/call"}
                 check({"initialize", "tools/list", "tools/call"}.issubset(methods), "Fixture did not observe a real MCP handshake and tool call")
                 check(tools_called == TOOLS, "Client did not call all four Canvas tools")
                 report["fixture"] = {"endpoint": endpoint, "toolsCalled": sorted(tools_called), "requestCount": len(fixture.calls)}
-            report["offline"] = offline_check(args.codex, environment, cwd, endpoint != CANONICAL_ENDPOINT)
-            with McpFixture(int(urlsplit(endpoint).port)) as recovered:
+            report["offline"] = offline_check(args.codex, environment, cwd)
+            with McpFixture() as recovered:
                 report["reconnectedEngine"] = engine_checks(args.codex, environment, cwd, selector, endpoint, recovered)
-        # Skill discovery must still work in endpoint-override diagnostics; the
-        # fallback is disclosed in the report rather than claimed as package MCP.
-        report["endpointOverride"] = endpoint != CANONICAL_ENDPOINT
+        check((home / "config.toml").read_bytes() == installed_config,
+              "Connection checks must not rewrite the installed client's configuration")
+        check({str(path.relative_to(installed_root)): hashlib.sha256(path.read_bytes()).hexdigest()
+               for path in installed_root.rglob("*") if path.is_file()} == installed_files,
+              "Connection checks must not modify the installed plugin bundle")
+        report["bundledConnectionOnly"] = True
+        report["installationConfigurationUnchanged"] = True
+        report["installedBundleUnchanged"] = True
         run_cli(args.codex, ["plugin", "remove", selector, "--json"], environment, cwd)
         removed = run_cli(args.codex, ["plugin", "list", "--json"], environment, cwd)
         installed_rows = removed.get("installed", []) if isinstance(removed, dict) else removed

@@ -2,7 +2,9 @@
 
 Canvas'ta açık projeleri yerel MCP bağlantısıyla Codex'e okutun. Eklenti açık projeleri, kartları, bağlantıları ve agent tanımlarını okuyabilir; projeleri değiştirmez veya üretim başlatmaz.
 
-Windows'ta Canvas ve Codex aynı bilgisayarda çalışmalıdır. Eklenti `http://127.0.0.1:47321/mcp` adresine bağlanır. Canvas ayarlarındaki adres farklıysa, örneğin eski bir kurulumda `51098` görünüyorsa, [farklı adres kurulumu](docs/troubleshooting.md#canvas-adresi-farklı) için birkaç ek adım gerekir. Mevcut adresiniz otomatik değiştirilmez.
+Windows'ta Canvas ve Codex aynı bilgisayarda çalışmalıdır. Canvas ve eklenti aynı sabit yerel HTTP adresini kullanır: `http://127.0.0.1:47321/mcp`. Kullanıcının adres veya config dosyası düzenlemesi gerekmez.
+
+**Gereksinim:** Bu sabit adresi kullanan güncel Canvas sürümü. Eklenti yüklemek çalışan Canvas sürümünü güncellemez; güncelleme yaptıysanız Canvas'ı yeniden açın.
 
 ## Kurulum
 

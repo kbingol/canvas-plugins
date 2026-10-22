@@ -4,31 +4,9 @@
 
 Canvas'ın aynı bilgisayarda açık olduğunu ve **Ayarlar → MCP bağlantısı** bölümünde bağlantının açık göründüğünü kontrol edin. Ardından yeni bir yerel Codex sohbeti başlatın. Bu eklenti Canvas'ı kendiliğinden başlatmaz.
 
-Standart paketin adresi `http://127.0.0.1:47321/mcp` olmalıdır. Canvas başka bir programın bu portu kullandığını bildiriyorsa bağlantı kendiliğinden farklı porta taşınmaz; çakışmayı çözmek gerekir. `127.0.0.1` her zaman istemcinin çalıştığı bilgisayarı gösterir; başka bir makinede çalışan oturum bu Canvas'a ulaşamaz.
+**Güncel Canvas gereklidir.** Canvas ve eklenti aynı sabit `http://127.0.0.1:47321/mcp` adresini kullanır. Eklentiyi kurmak çalışan Canvas sürümünü güncellemez; güncelleme yaptıysanız Canvas'ı yeniden açın. Adres yapıştırmanız veya config düzenlemeniz gerekmez.
 
-## Canvas adresi farklı
-
-Eski Canvas profilleri, örneğin `http://127.0.0.1:51098/mcp` gibi başka bir adresi koruyabilir. Mevcut adresi ve diğer istemcilerin ayarlarını değiştirmeden bağlanabilirsiniz:
-
-1. Canvas'ta **Kopyala** ile gerçek bağlantı adresinizi alın.
-2. Codex'te **Ayarlar → MCP sunucuları → Sunucu ekle** bölümünde `canvas-local` adlı bir **Streamable HTTP** bağlantısı oluşturup bu adresi yapıştırın. Alternatif olarak terminalde, aşağıdaki örneğin URL'sini kendi adresinizle değiştirerek çalıştırın:
-
-   ```powershell
-   codex mcp add canvas-local --url http://127.0.0.1:51098/mcp
-   ```
-
-3. Kurulu Canvas eklentisinin 47321 adresine ikinci bir bağlantı denemesini önlemek için `%USERPROFILE%\.codex\config.toml` dosyanızda aşağıdaki bölümü ekleyin veya mevcut aynı bölümde `enabled` değerini değiştirin:
-
-   ```toml
-   [plugins."canvas@canvas-plugins".mcp_servers.canvas]
-   enabled = false
-   ```
-
-4. İstemciyi yeniden başlatıp yeni bir yerel sohbet açın. Eklentinin kullanım talimatları kalır; araçlar `canvas-local` bağlantısı üzerinden gelir.
-
-Mevcut `canvas-local` kaydınız varsa yeni bir kayıt eklemek yerine önce adresini kontrol edin. `config.toml` dosyanızı bütünüyle değiştirmeyin ve aynı TOML bölümünü iki kez oluşturmayın. Yalnızca bu eklentinin sunucusunu kapatın; eklentinin tamamını kapatmanız gerekmez. Kurulu eklenti önbelleğindeki `mcp.json` dosyasını düzenlemeyin; paket yenilendiğinde bu değişiklik kaybolabilir.
-
-Bu yöntem OpenAI'nin [doğrudan MCP kurulumu ve eklenti sunucusu ayarlarını](https://learn.chatgpt.com/docs/extend/mcp?surface=cli) kullanır. Eklenti politikası için belgelenmiş bir URL değiştirme alanı varsaymaz.
+Canvas başka bir programın standart portu kullandığını bildiriyorsa o programın çakışmasını çözün. Eklenti kendiliğinden farklı porta veya başka bir uygulamaya bağlanmaz. `127.0.0.1` her zaman istemcinin çalıştığı bilgisayarı gösterir; başka bir makinede çalışan oturum bu Canvas'a ulaşamaz.
 
 ## Eklenti görünmüyor veya araçlar gelmiyor
 
@@ -49,6 +27,4 @@ Bu komut katalog kaynağını yeniler. Eklentinin kurulu sürümünü ayrıca ko
 
 ## Kaldırma
 
-Eklentiler ekranından Canvas'ı kaldırın veya `codex plugin remove canvas@canvas-plugins` kullanın. Pazar yeri kaynağını da kaldırmak isterseniz `codex plugin marketplace remove canvas-plugins` çalıştırın. Bunlar Canvas projelerinizi silmez ve Canvas'ın MCP tercihini değiştirmez.
-
-Farklı adres için ayrıca `canvas-local` bağlantısı eklediyseniz, onu MCP ayarlarından veya `codex mcp remove canvas-local` ile ayrı kaldırın. [Resmî yaşam döngüsü komutları](https://learn.chatgpt.com/docs/developer-commands)
+Eklentiler ekranından Canvas'ı kaldırın veya `codex plugin remove canvas@canvas-plugins` kullanın. Pazar yeri kaynağını da kaldırmak isterseniz `codex plugin marketplace remove canvas-plugins` çalıştırın. Bunlar Canvas projelerinizi silmez ve Canvas'ın MCP tercihini değiştirmez. [Resmî yaşam döngüsü komutları](https://learn.chatgpt.com/docs/developer-commands)

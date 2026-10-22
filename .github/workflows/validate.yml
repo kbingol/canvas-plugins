@@ -38,5 +38,3 @@ jobs:
         run: npm install --global @openai/codex@0.163.0
       - name: Install, discover and call tools without model inference
         run: python scripts/test_install.py
-      - name: Verify custom-port compatibility
-        run: python scripts/test_install.py --fixture-port 51098 --artifacts artifacts/custom-port

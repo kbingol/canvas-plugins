@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "canvas",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Read open projects, node text, connections, and available agent definitions from the local Canvas desktop app.",
   "author": {
     "name": "Algomim"
@@ -22,7 +22,7 @@
       "interface": {
         "displayName": "Canvas",
         "shortDescription": "Read your local Canvas",
-        "longDescription": "Explore open projects in Canvas: read node text previews and connections, and inspect the available agent definitions. Canvas must be running on the same Windows computer with MCP enabled. This connection is read-only: it cannot edit projects, execute agents, generate content, or return complete image, video, or document files. The package connects to the default local endpoint; setup explains how to connect an existing custom profile.",
+        "longDescription": "Explore open projects in Canvas: read node text previews and connections, and inspect the available agent definitions. Canvas must be running on the same Windows computer with MCP enabled at its fixed local endpoint. This connection is read-only: it cannot edit projects, execute agents, generate content, or return complete image, video, or document files. No manual client configuration is required.",
         "developerName": "Algomim",
         "category": "Productivity",
         "capabilities": [

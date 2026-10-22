@@ -18,9 +18,11 @@ The package contains no launch hook or transport bridge. Installing it does not 
 
 ## Endpoint and compatibility
 
-The manifest uses `type: "streamable-http"` and the literal URL `http://127.0.0.1:47321/mcp`. Port 47321 matches `McpHttpEndpoint.DefaultPort` in the [Canvas application contract](https://github.com/kbingol/canvas/blob/main/src/Canvas.Application/Automation/McpConnectionContracts.cs). A developer's previously saved port is not a distributable default.
+The manifest uses `type: "streamable-http"` and the literal URL `http://127.0.0.1:47321/mcp`. Canvas uses that same fixed address, defined in the [Canvas application contract](https://github.com/kbingol/canvas/blob/main/src/Canvas.Application/Automation/McpConnectionContracts.cs).
 
-Existing Canvas profiles can retain another valid port. The package does not silently migrate them. The supported compatibility route is a separate direct HTTP MCP registration plus disabling only the plugin's bundled server. See [troubleshooting](troubleshooting.md#canvas-adresi-farklı). OpenAI documents [direct HTTP configuration and plugin server policy](https://learn.chatgpt.com/docs/extend/mcp?surface=cli); it does not document a per-user plugin URL override in that policy. This package does not depend on URL interpolation or endpoint discovery.
+Canvas exposes one fixed loopback MCP endpoint. Installation needs no direct MCP registration, configuration edits, URL interpolation, discovery command, lifecycle hook, or transport bridge. The application must be updated and running with MCP enabled; installing the plugin cannot update a running application binary.
+
+OpenAI's [bundled MCP configuration](https://developers.openai.com/plugins/build/plugins#bundled-mcp-servers-and-lifecycle-hooks) supports the literal HTTP URL used here. Its [plugin server policy](https://learn.chatgpt.com/docs/extend/mcp?surface=cli) controls enablement and tool policy, not a per-user replacement URL. Keeping the stable endpoint in the application avoids relying on an undocumented plugin override.
 
 Canvas currently exposes four read-only tools: `canvas_get_status`, `canvas_list_projects`, `canvas_get_project`, and `canvas_list_agents`. The plugin skill must respect project session IDs, paging and truncation. It must not promise editing, execution or model generation. The [Canvas MCP contract and access boundary](https://github.com/kbingol/canvas/blob/main/docs/mcp.md) define those capabilities.
 
@@ -30,4 +32,4 @@ The HTTP listener is local and unauthenticated. Canvas applies loopback, Host an
 
 Package checks validate JSON schemas, catalog paths, stable names and versions, local-execution metadata, and the exact loopback endpoint. Installation checks use an isolated Codex home so existing configuration and installed caches are untouched. A meaningful runtime check must initialize the installed plugin's HTTP connection and call its advertised tools against an actual Canvas-compatible server; parsing the manifest alone is insufficient.
 
-For a release, also verify a fresh install from the published Git source, a new session, useful empty-workspace results, live project reads, and graceful failure while Canvas is closed or MCP is off. Verify the custom-port compatibility path separately. See [release validation](validation.md) for actual checks and reproduction commands.
+For a release, also verify a fresh install from the published Git source, a new session, useful empty-workspace results, live project reads, and graceful failure while Canvas is closed or MCP is off. The installation fixture uses the exact packaged address; Canvas's own production-host tests verify that the real application serves it. See [release validation](validation.md) for checks and reproduction commands.
