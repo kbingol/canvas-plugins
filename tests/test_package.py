@@ -57,7 +57,7 @@ class PackageChecks(unittest.TestCase):
         self.assertNotIn("env", server)
         self.assertNotIn("oauth", server)
 
-    def test_skill_is_bundled_and_covers_real_read_only_session_contract(self):
+    def test_skills_cover_workspace_reads_and_assistant_authoring(self):
         files = list((self.plugin_root / "skills").glob("*/SKILL.md"))
         self.assertTrue(files, "Canvas skill must be included")
         combined = "\n".join(path.read_text(encoding="utf-8") for path in files)
@@ -102,7 +102,36 @@ class FixtureContractChecks(unittest.TestCase):
             self.assertEqual(self.rpc(fixture.endpoint, "notifications/initialized", identifier=None), (202, None))
             tools = self.rpc(fixture.endpoint, "tools/list")[1]["result"]["tools"]
             self.assertEqual({tool["name"] for tool in tools}, install.TOOLS)
-            self.assertTrue(all(tool["annotations"]["readOnlyHint"] for tool in tools))
+            for tool in tools:
+                self.assertEqual(tool["annotations"]["readOnlyHint"], tool["name"] in install.READ_TOOLS)
+                self.assertFalse(tool["annotations"]["destructiveHint"])
+
+    def test_assistant_create_inspect_and_export_cross_the_http_connection(self):
+        with install.McpFixture(0) as fixture:
+            def call(name, arguments):
+                return self.rpc(fixture.endpoint, "tools/call", {"name": name, "arguments": arguments})[1]["result"]
+
+            definition = {"id": "user.contract", "pluginId": "user.assistant.contract", "name": "Contract",
+                          "description": "Test assistant", "instructions": "Translate supplied text.",
+                          "contextPreamble": "Translate the ordered context."}
+            created = call("canvas_create_assistant", {"definition": definition})
+            self.assertFalse(created["isError"])
+            self.assertEqual(install.structured(created)["id"], definition["id"])
+            listed = install.structured(call("canvas_list_agents", {}))["agents"]
+            self.assertIn(definition["id"], {item["id"] for item in listed})
+            inspected = install.structured(call("canvas_get_assistant", {"assistantId": definition["id"]}))
+            self.assertEqual(inspected["instructions"], definition["instructions"])
+            self.assertEqual(inspected["version"], "1.0.0")
+            duplicate = call("canvas_create_assistant", {"definition": definition})
+            self.assertTrue(duplicate["isError"])
+            first = install.structured(call("canvas_export_assistant", {"assistantId": definition["id"]}))
+            second = install.structured(call("canvas_export_assistant", {"assistantId": definition["id"]}))
+            self.assertTrue(first["filePath"].endswith(".flowast"))
+            self.assertNotEqual(first["filePath"], second["filePath"])
+            collision = call("canvas_export_assistant", {"assistantId": definition["id"], "destinationPath": first["filePath"]})
+            self.assertTrue(collision["isError"])
+            for tool in ("canvas_get_assistant", "canvas_export_assistant"):
+                self.assertTrue(call(tool, {"assistantId": "missing"})["isError"])
 
     def test_projects_route_by_session_and_page_nodes_and_edges_independently(self):
         with install.McpFixture(0) as fixture:

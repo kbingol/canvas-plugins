@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "canvas",
-  "version": "1.1.0",
-  "description": "Read open projects, node text, connections, and available agent definitions from the local Canvas desktop app.",
+  "version": "1.2.0",
+  "description": "Read local Canvas projects and create or export assistant packages through the running desktop app.",
   "author": {
     "name": "Algomim"
   },
@@ -21,17 +21,19 @@
       "onboardingSkill": "./skills/setup/SKILL.md",
       "interface": {
         "displayName": "Canvas",
-        "shortDescription": "Read your local Canvas",
-        "longDescription": "Explore open projects in Canvas: read node text previews and connections, and inspect the available agent definitions. Canvas must be running on the same Windows computer with MCP enabled at its fixed local endpoint. This connection is read-only: it cannot edit projects, execute agents, generate content, or return complete image, video, or document files. No manual client configuration is required.",
+        "shortDescription": "Canvas projects and assistants",
+        "longDescription": "Explore open Canvas projects, node text previews, connections, and available agent definitions. Create an assistant from instructions and skills, save it to Canvas's local user assistant folder, and export installed assistants as .flowast packages. Canvas must be running on the same Windows computer with MCP enabled at its fixed local endpoint. Assistant creation and export write package files; project access remains read-only. The connection cannot edit projects, execute assistants, generate media, or return original asset files. No manual client configuration is required.",
         "developerName": "Algomim",
         "category": "Productivity",
         "capabilities": [
-          "Read"
+          "Read",
+          "Write"
         ],
         "defaultPrompt": [
           "Summarize the active project in Canvas.",
           "Explain the connections between nodes in my Canvas project.",
-          "Which agent definitions are available in Canvas?"
+          "Which agent definitions are available in Canvas?",
+          "Create a Turkish translation assistant in Canvas and export it as a .flowast package."
         ],
         "composerIcon": "./assets/icon.svg",
         "composerIconDark": "./assets/icon-dark.svg",

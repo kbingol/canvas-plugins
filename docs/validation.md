@@ -2,9 +2,9 @@
 
 ## Validation scope
 
-Version 1.1.0 uses one fixed endpoint shared with Canvas. The actual installed plugin must own the connection to `http://127.0.0.1:47321/mcp`; a separate direct MCP registration is never accepted as proof that the package works.
+Version 1.2.0 uses one fixed endpoint shared with Canvas. The actual installed plugin must own the connection to `http://127.0.0.1:47321/mcp`; a separate direct MCP registration is never accepted as proof that the package works.
 
-The package uses portable root manifests and the vendored Agent Plugins 1.0.0 JSON schemas. Validation covers schema and skill frontmatter, package boundaries, reproducible archives, and a real Codex CLI installation in disposable homes. The client test discovers both packaged skills and all four tools, calls the read-only tools, checks session routing, pagination and errors, and verifies offline/reconnect behavior without a model turn.
+The package uses portable root manifests and the vendored Agent Plugins 1.0.0 JSON schemas. Validation covers schema and skill frontmatter, package boundaries, reproducible archives, and a real Codex CLI installation in disposable homes. The client test discovers three packaged skills and all seven tools, checks read/write annotations, session routing, pagination and errors, and verifies offline/reconnect behavior without a model turn. Assistant creation, inspection, duplicate rejection, and export run only against in-memory fixture state. These fixture checks exercise the installed connection, not the real Canvas package implementation.
 
 The fixture uses the exact packaged URL. No global MCP registration, disabled bundled server, or URL override is introduced. A regression test rejects a different endpoint before installation or any CLI/configuration operation.
 
@@ -31,4 +31,4 @@ The fixture refuses to replace an occupied listener. Run the fixture checks in a
 python scripts/test_install.py --endpoint http://127.0.0.1:47321/mcp --artifacts artifacts/live
 ```
 
-Live mode accepts only the packaged endpoint. Supplying another URL fails before installation rather than creating a workaround registration. Calls are read-only, and reports contain installation evidence and counts rather than project contents. All lifecycle writes are confined to disposable test homes. User configuration is hashed before and after the run; account credentials are neither copied nor requested. No model listing, inference, or paid generation is started. `app-server` is only a diagnostic client; experimental plugin mutation APIs are not shipped as an installer.
+Live mode accepts only the packaged endpoint. Supplying another URL fails before installation rather than creating a workaround registration. Calls against the real Canvas app are read-only, and reports contain installation evidence and counts rather than project contents. Live discovery verifies that authoring tools are advertised but never creates or exports an assistant. All diagnostic lifecycle writes are confined to disposable test homes. User configuration is hashed before and after the run; account credentials are neither copied nor requested. No model listing, inference, or paid generation is started. `app-server` is only a diagnostic client; experimental plugin mutation APIs are not shipped as an installer.

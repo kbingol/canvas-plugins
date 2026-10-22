@@ -25,6 +25,14 @@ Bu komut katalog kaynağını yeniler. Eklentinin kurulu sürümünü ayrıca ko
 
 Önce Canvas'ta bir proje açın. Araçlar yalnızca çalışan uygulamadaki açık proje oturumlarını okur; diskteki bütün `.flow` dosyalarını taramaz. Projeyi kapatıp yeniden açtıysanız yeni oturum kimliğini almak için proje listesini tekrar isteyin.
 
+## Asistan oluşturma veya dışarı aktarma araçları yok
+
+Bu işlemler için hem Canvas eklentisi 1.2.0 hem de asistan oluşturma araçlarını sunan güncel Canvas uygulaması gerekir. `canvas_get_assistant`, `canvas_create_assistant` ve `canvas_export_assistant` araçlarının görünmesini kontrol edin. Eklentiyi güncellemek çalışan Canvas uygulamasına yeni araç eklemez; yeni uygulama sürümünü açıp MCP bağlantısını yenileyin. Yeni araçlar gelene kadar proje okuma işlemleri çalışabilir. Profil klasörüne elle yazarak veya kurulu eklenti cache'ini değiştirerek bağlantıyı aşmaya çalışmayın.
+
+## Asistan kimliği veya dışarı aktarma dosyası zaten var
+
+Oluşturma mevcut paketi değiştirmez. Farklı bir asistan oluşturuyorsanız yeni, benzersiz bir `id` ve `pluginId` kullanın; mevcut asistanı güncellemek için henüz MCP aracı yoktur. Dışarı aktarmada dosya yolunu belirtmezseniz Canvas `Exports` klasöründe benzersiz bir ad seçer. Belirli bir dosya istiyorsanız mevcut dosyayı ezmeyen, mutlak bir `.flowast` yolu verin. Hata veya bağlantı kopmasından sonra aynı yazma çağrısını tekrarlamadan önce işlemin tamamlanıp tamamlanmadığını kontrol edin.
+
 ## Kaldırma
 
 Eklentiler ekranından Canvas'ı kaldırın veya `codex plugin remove canvas@canvas-plugins` kullanın. Pazar yeri kaynağını da kaldırmak isterseniz `codex plugin marketplace remove canvas-plugins` çalıştırın. Bunlar Canvas projelerinizi silmez ve Canvas'ın MCP tercihini değiştirmez. [Resmî yaşam döngüsü komutları](https://learn.chatgpt.com/docs/developer-commands)

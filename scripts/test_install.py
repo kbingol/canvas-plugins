@@ -3,7 +3,7 @@
 
 Only Python's standard library and an installed Codex CLI are required. All
 configuration, caches, and logs belong to a disposable CODEX_HOME. By default a
-deterministic read-only MCP fixture owns the package's canonical loopback port;
+deterministic in-memory MCP fixture owns the package's canonical loopback port;
 an occupied port is an error, never a reason to stop another application.
 
 App-server is used as a diagnostic client only. No app-server plugin mutation
@@ -34,7 +34,9 @@ import uuid
 
 
 CANONICAL_ENDPOINT = "http://127.0.0.1:47321/mcp"
-TOOLS = frozenset(("canvas_get_status", "canvas_list_projects", "canvas_get_project", "canvas_list_agents"))
+READ_TOOLS = frozenset(("canvas_get_status", "canvas_list_projects", "canvas_get_project", "canvas_list_agents", "canvas_get_assistant"))
+WRITE_TOOLS = frozenset(("canvas_create_assistant", "canvas_export_assistant"))
+TOOLS = READ_TOOLS | WRITE_TOOLS
 PROJECT_A = "11111111-1111-4111-8111-111111111111"
 PROJECT_B = "22222222-2222-4222-8222-222222222222"
 COMMON_FLAGS = ("--disable", "remote_plugin", "--disable", "apps")
@@ -192,7 +194,7 @@ class AppServer:
     def __enter__(self) -> "AppServer":
         try:
             self.call("initialize", {
-                "clientInfo": {"name": "canvas_plugin_install_test", "title": "Canvas installation diagnostic", "version": "1.1.0"},
+                "clientInfo": {"name": "canvas_plugin_install_test", "title": "Canvas installation diagnostic", "version": "1.2.0"},
                 # Diagnostics only: mcpServer/tool/call is experimental in some CLI versions.
                 "capabilities": {"experimentalApi": True},
             })
@@ -234,10 +236,23 @@ def tool_definition(name: str) -> dict[str, Any]:
             "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 100},
         }
         schema["required"] = ["sessionId"]
+    elif name in {"canvas_get_assistant", "canvas_export_assistant"}:
+        schema["properties"] = {"assistantId": {"type": "string"}}
+        schema["required"] = ["assistantId"]
+        if name == "canvas_export_assistant":
+            schema["properties"]["destinationPath"] = {"type": "string"}
+    elif name == "canvas_create_assistant":
+        fields = ("id", "pluginId", "name", "description", "instructions", "contextPreamble")
+        schema["properties"] = {"definition": {
+            "type": "object", "properties": {field: {"type": "string"} for field in fields},
+            "required": list(fields), "additionalProperties": True,
+        }}
+        schema["required"] = ["definition"]
+    read_only = name in READ_TOOLS
     return {
-        "name": name, "description": "Read-only Canvas installation-test fixture: " + name,
+        "name": name, "description": "In-memory Canvas installation-test fixture: " + name,
         "inputSchema": schema,
-        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+        "annotations": {"readOnlyHint": read_only, "destructiveHint": False, "idempotentHint": read_only, "openWorldHint": False},
     }
 
 
@@ -253,6 +268,12 @@ class McpFixture:
     def __init__(self, port: int = 47321):
         self.calls: list[dict[str, Any]] = []
         self.lock = threading.Lock()
+        self.assistants = {"fixture-agent": {
+            "id": "fixture-agent", "pluginId": "fixture", "version": "1.0.0", "name": "Fixture agent",
+            "description": "In-memory diagnostic assistant", "instructions": "Translate the supplied text.",
+            "contextPreamble": "Translate the ordered context.", "icon": "text", "tools": [], "skills": [],
+        }}
+        self.exports: set[str] = set()
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -333,7 +354,40 @@ class McpFixture:
         elif name == "canvas_list_projects":
             value = {"projects": [fixture_project(PROJECT_A), fixture_project(PROJECT_B)]}
         elif name == "canvas_list_agents":
-            value = {"agents": [{"id": "fixture-agent", "pluginId": "fixture", "version": "1.0.0", "name": "Fixture agent", "inputs": [], "outputs": []}]}
+            with self.lock:
+                value = {"agents": [{**{key: item[key] for key in ("id", "pluginId", "version", "name")},
+                                     "inputs": [], "outputs": []} for item in self.assistants.values()]}
+        elif name == "canvas_get_assistant":
+            with self.lock:
+                value = self.assistants.get(arguments.get("assistantId"))
+            if value is None:
+                value, error = {"error": {"code": "assistant_not_found"}}, "assistant_not_found"
+        elif name == "canvas_create_assistant":
+            definition = arguments.get("definition")
+            fields = ("id", "pluginId", "name", "description", "instructions", "contextPreamble")
+            if not isinstance(definition, dict) or any(not isinstance(definition.get(key), str) or not definition[key].strip() for key in fields):
+                value, error = {"error": {"code": "invalid_argument"}}, "invalid_argument"
+            else:
+                with self.lock:
+                    if any(item["id"] == definition["id"] or item["pluginId"] == definition["pluginId"] for item in self.assistants.values()):
+                        value, error = {"error": {"code": "assistant_conflict"}}, "assistant_conflict"
+                    else:
+                        stored = {"version": "1.0.0", "icon": "text", "tools": [], "skills": [], **definition}
+                        self.assistants[stored["id"]] = stored
+                        value = {key: stored[key] for key in ("id", "pluginId", "name", "version")}
+                        value["directoryPath"] = "fixture/assistants/" + stored["id"]
+        elif name == "canvas_export_assistant":
+            with self.lock:
+                assistant = self.assistants.get(arguments.get("assistantId"))
+                if assistant is None:
+                    value, error = {"error": {"code": "assistant_not_found"}}, "assistant_not_found"
+                else:
+                    target = arguments.get("destinationPath") or f"fixture/Exports/{assistant['id']}-{len(self.exports) + 1}.flowast"
+                    if target in self.exports:
+                        value, error = {"error": {"code": "destination_exists"}}, "destination_exists"
+                    else:
+                        self.exports.add(target)
+                        value = {"id": assistant["id"], "version": assistant["version"], "filePath": target, "byteLength": 512}
         elif name == "canvas_get_project":
             session = arguments.get("sessionId")
             offset, limit = arguments.get("offset", 0), arguments.get("limit", 100)
@@ -387,11 +441,13 @@ def discover_canvas(server: AppServer, thread_id: str | None = None) -> dict[str
         params["threadId"] = thread_id
     inventory = server.call("mcpServerStatus/list", params)
     matches = [item for item in inventory["data"] if TOOLS.issubset(set(item.get("tools", {})))]
-    check(len(matches) == 1, f"Expected one connected Canvas server with all four tools; inventory: {inventory}")
+    check(len(matches) == 1, f"Expected one connected Canvas server with all seven tools; inventory: {inventory}")
     result = matches[0]
     check(result.get("toolsError") is None, "Canvas MCP tool discovery reported an error")
-    for tool in result["tools"].values():
-        check(tool.get("annotations", {}).get("readOnlyHint") is True, f"Tool must advertise read-only behavior: {tool.get('name')}")
+    for name in TOOLS:
+        tool = result["tools"][name]
+        check(tool.get("annotations", {}).get("readOnlyHint") is (name in READ_TOOLS),
+              f"Tool must advertise its actual read/write behavior: {name}")
     return result
 
 
@@ -401,7 +457,7 @@ def engine_checks(codex: str, environment: dict[str, str], cwd: Path, selector: 
         skills = server.call("skills/list", {"cwds": [str(cwd)], "forceReload": True})
         bundled = [skill for entry in skills["data"] for skill in entry["skills"]
                    if skill.get("pluginId") == selector and skill.get("enabled")]
-        check({"canvas:canvas", "canvas:setup"}.issubset({skill["name"] for skill in bundled}),
+        check({"canvas:canvas", "canvas:setup", "canvas:assistant-authoring"}.issubset({skill["name"] for skill in bundled}),
               "Installed Canvas workflow and onboarding skills are not discoverable by the real Codex loader")
         check(all(not entry["errors"] for entry in skills["data"]), "Installed skill discovery returned errors")
         # thread/start creates only an empty, ephemeral context. No turn is run.
@@ -427,6 +483,7 @@ def engine_checks(codex: str, environment: dict[str, str], cwd: Path, selector: 
         agents = call("canvas_list_agents")
         check(not agents.get("isError") and isinstance(structured(agents)["agents"], list), "Canvas agent listing failed")
         project_checks = 0
+        authoring_checks = 0
         if fixture:
             check(len(projects) == 2 and projects[0]["title"] == projects[1]["title"], "Fixture must exercise duplicate project titles")
             selected = next(project for project in projects if not project["isActive"])
@@ -440,6 +497,22 @@ def engine_checks(codex: str, environment: dict[str, str], cwd: Path, selector: 
             stale = call("canvas_get_project", {"sessionId": "33333333-3333-4333-8333-333333333333"})
             check(stale.get("isError") is True and structured(stale)["error"]["code"] == "project_not_found", "Stale session error was lost by the client")
             project_checks = 4
+            # Writes below affect only this fixture's in-memory dictionaries.
+            original = call("canvas_get_assistant", {"assistantId": "fixture-agent"})
+            check(not original.get("isError") and structured(original)["instructions"], "Assistant definition inspection failed")
+            definition = {"id": "user.install-check", "pluginId": "user.assistant.install-check", "name": "Install check",
+                          "description": "In-memory connection check", "instructions": "Translate the supplied text.",
+                          "contextPreamble": "Translate ordered context."}
+            created = call("canvas_create_assistant", {"definition": definition})
+            check(not created.get("isError") and structured(created)["id"] == definition["id"], "Assistant creation result was lost")
+            duplicate = call("canvas_create_assistant", {"definition": definition})
+            check(duplicate.get("isError") is True, "Duplicate assistant creation must remain an error")
+            inspected = call("canvas_get_assistant", {"assistantId": definition["id"]})
+            check(not inspected.get("isError") and structured(inspected)["instructions"] == definition["instructions"],
+                  "Created definition must round-trip through the installed connection")
+            exported = call("canvas_export_assistant", {"assistantId": definition["id"]})
+            check(not exported.get("isError") and structured(exported)["filePath"].endswith(".flowast"), "Assistant export result was lost")
+            authoring_checks = 5
         else:
             loaded = [project for project in projects if project.get("isLoaded") and not project.get("isClosing")]
             if loaded:
@@ -453,7 +526,7 @@ def engine_checks(codex: str, environment: dict[str, str], cwd: Path, selector: 
             project_checks += 1
         return {"serverName": inventory["name"], "pluginId": inventory.get("pluginId"),
                 "toolCount": len(inventory["tools"]), "bundledSkillNames": [skill["name"] for skill in bundled],
-                "projectChecks": project_checks, "modelTurns": 0}
+                "projectChecks": project_checks, "fixtureAuthoringChecks": authoring_checks, "modelTurns": 0}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -520,7 +593,7 @@ def main(argv: list[str] | None = None) -> int:
                 methods = {request["method"] for request in fixture.calls}
                 tools_called = {request["params"]["name"] for request in fixture.calls if request["method"] == "tools/call"}
                 check({"initialize", "tools/list", "tools/call"}.issubset(methods), "Fixture did not observe a real MCP handshake and tool call")
-                check(tools_called == TOOLS, "Client did not call all four Canvas tools")
+                check(tools_called == TOOLS, "Client did not call all seven Canvas tools")
                 report["fixture"] = {"endpoint": endpoint, "toolsCalled": sorted(tools_called), "requestCount": len(fixture.calls)}
             report["offline"] = offline_check(args.codex, environment, cwd)
             with McpFixture() as recovered:

@@ -29,6 +29,8 @@ class ReleaseChecks(unittest.TestCase):
                 self.assertEqual(archive.read("LICENSE"), (ROOT / "LICENSE").read_bytes())
                 self.assertEqual(json.loads(archive.read("plugin.json"))["name"], "canvas")
                 self.assertIn("skills/setup/SKILL.md", archive.namelist())
+                self.assertIn("skills/assistant-authoring/SKILL.md", archive.namelist())
+                self.assertIn("skills/assistant-authoring/references/definition.md", archive.namelist())
                 for name in archive.namelist():
                     self.assertFalse(name.startswith(("/", "\\")))
                     self.assertNotIn("..", Path(name).parts)
